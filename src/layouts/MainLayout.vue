@@ -1,0 +1,271 @@
+<script setup lang="ts">
+import { computed, h, ref } from 'vue'
+import type { Component } from 'vue'
+import { RouterView, useRoute, useRouter } from 'vue-router'
+import type { MenuOption } from 'naive-ui'
+import {
+  NAvatar,
+  NBreadcrumb,
+  NBreadcrumbItem,
+  NButton,
+  NIcon,
+  NLayout,
+  NLayoutContent,
+  NLayoutHeader,
+  NLayoutSider,
+  NMenu,
+  NSpace,
+  NText,
+} from 'naive-ui'
+import {
+  AnalyticsOutline,
+  BarChartOutline,
+  BusinessOutline,
+  GitNetworkOutline,
+  HomeOutline,
+  PeopleOutline,
+  PieChartOutline,
+  SettingsOutline,
+  ShieldCheckmarkOutline,
+  TrailSignOutline,
+} from '@vicons/ionicons5'
+
+function renderIcon(icon: Component) {
+  return () => h(NIcon, null, { default: () => h(icon) })
+}
+
+const collapsed = ref(false)
+const route = useRoute()
+const router = useRouter()
+
+const menuOptions: MenuOption[] = [
+  {
+    label: '首页驾驶舱',
+    key: '/dashboard',
+    icon: renderIcon(HomeOutline),
+  },
+  {
+    label: '数据资产管理',
+    key: 'data-assets',
+    icon: renderIcon(BusinessOutline),
+    children: [
+      { label: '数据目录', key: '/data-assets/catalog' },
+      { label: '域管理', key: '/data-assets/domain' },
+      { label: '血缘管理', key: '/data-assets/lineage' },
+      { label: '数据质量', key: '/data-assets/quality' },
+      { label: '数据字典', key: '/data-assets/dictionary' },
+      { label: '数据产品', key: '/data-assets/products' },
+    ],
+  },
+  {
+    label: '元数据管理',
+    key: 'metadata',
+    icon: renderIcon(GitNetworkOutline),
+    children: [
+      { label: '指标管理', key: '/metadata/metrics' },
+      { label: '维度管理', key: '/metadata/dimensions' },
+      { label: '数据源管理', key: '/metadata/data-sources' },
+      { label: '报表管理', key: '/metadata/reports' },
+    ],
+  },
+  {
+    label: '用户洞察',
+    key: 'user-insight',
+    icon: renderIcon(PeopleOutline),
+    children: [
+      { label: '标签管理', key: '/user-insight/tags' },
+      { label: '标签订阅', key: '/user-insight/tag-subscriptions' },
+      { label: '用户分群', key: '/user-insight/segments' },
+      { label: '用户画像', key: '/user-insight/profiles' },
+    ],
+  },
+  {
+    label: '数据洞察',
+    key: 'data-insight',
+    icon: renderIcon(PieChartOutline),
+    children: [
+      { label: '指标分析', key: '/data-insight/metric-analysis' },
+      { label: '漏斗分析', key: '/data-insight/funnel' },
+      { label: '留存分析', key: '/data-insight/retention' },
+      { label: '归因分析', key: '/data-insight/attribution' },
+      { label: 'LTV 分析', key: '/data-insight/ltv' },
+      { label: '数据预测', key: '/data-insight/prediction' },
+    ],
+  },
+  {
+    label: '智能运营',
+    key: 'intelligent-operation',
+    icon: renderIcon(TrailSignOutline),
+    children: [
+      { label: '运营概览', key: '/intelligent-operation/overview' },
+      { label: '人群圈选', key: '/intelligent-operation/audience' },
+      { label: '策略中心', key: '/intelligent-operation/strategies' },
+      { label: '运营任务', key: '/intelligent-operation/campaigns' },
+      { label: '触达中心', key: '/intelligent-operation/channels' },
+      { label: '效果评估', key: '/intelligent-operation/evaluation' },
+    ],
+  },
+  {
+    label: 'A/B 测试',
+    key: 'ab-testing',
+    icon: renderIcon(AnalyticsOutline),
+    children: [
+      { label: '实验概览', key: '/ab-testing/overview' },
+      { label: '实验列表', key: '/ab-testing/experiments' },
+      { label: '实验创建', key: '/ab-testing/create' },
+      { label: '实验结果', key: '/ab-testing/results' },
+    ],
+  },
+  {
+    label: '监控中心',
+    key: 'monitoring',
+    icon: renderIcon(BarChartOutline),
+    children: [
+      { label: '监控面板', key: '/monitoring/dashboard' },
+      { label: '数据摄取监控', key: '/monitoring/ingestion' },
+      { label: '指标监控', key: '/monitoring/metrics' },
+      { label: '告警配置', key: '/monitoring/alerts' },
+      { label: '日志浏览器', key: '/monitoring/logs' },
+    ],
+  },
+  {
+    label: '工作流审批',
+    key: 'workflow',
+    icon: renderIcon(ShieldCheckmarkOutline),
+    children: [
+      { label: '待办审批', key: '/workflow/todos' },
+      { label: '审批流配置', key: '/workflow/config' },
+    ],
+  },
+  {
+    label: '系统管理',
+    key: 'system',
+    icon: renderIcon(SettingsOutline),
+    children: [
+      { label: '用户管理', key: '/system/users' },
+      { label: '角色管理', key: '/system/roles' },
+      { label: '权限管理', key: '/system/permissions' },
+      { label: '数据隐私', key: '/system/privacy' },
+    ],
+  },
+]
+
+const selectedKeys = computed(() => [route.path])
+
+const breadcrumbItems = computed(() => {
+  const matched = route.matched.filter((item) => item.meta?.title)
+  return matched.map((item) => String(item.meta.title))
+})
+
+function handleMenuSelect(key: string) {
+  if (key.startsWith('/')) {
+    router.push(key)
+  }
+}
+</script>
+
+<template>
+  <n-layout has-sider class="main-layout">
+    <n-layout-sider
+      bordered
+      collapse-mode="width"
+      :collapsed-width="64"
+      :width="248"
+      :collapsed="collapsed"
+      show-trigger
+      @collapse="collapsed = true"
+      @expand="collapsed = false"
+    >
+      <div class="logo-area">
+        <div class="logo-mark">D</div>
+        <div v-if="!collapsed" class="logo-text">
+          <div class="logo-title">DataOps Demo</div>
+          <div class="logo-subtitle">智能数据运营平台</div>
+        </div>
+      </div>
+
+      <n-menu
+        :collapsed="collapsed"
+        :collapsed-width="64"
+        :collapsed-icon-size="20"
+        :options="menuOptions"
+        :value="selectedKeys[0]"
+        @update:value="handleMenuSelect"
+      />
+    </n-layout-sider>
+
+    <n-layout>
+      <n-layout-header bordered class="layout-header">
+        <div>
+          <n-breadcrumb>
+            <n-breadcrumb-item v-for="item in breadcrumbItems" :key="item">
+              {{ item }}
+            </n-breadcrumb-item>
+          </n-breadcrumb>
+        </div>
+
+        <n-space align="center">
+          <n-button secondary size="small">演示模式</n-button>
+          <n-avatar round size="small">X</n-avatar>
+          <n-text>Chaoyang Xu</n-text>
+        </n-space>
+      </n-layout-header>
+
+      <n-layout-content class="layout-content">
+        <router-view />
+      </n-layout-content>
+    </n-layout>
+  </n-layout>
+</template>
+
+<style scoped lang="scss">
+.main-layout {
+  height: 100vh;
+}
+
+.logo-area {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+}
+
+.logo-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #2563eb;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.logo-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.logo-subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.layout-header {
+  height: 56px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+}
+
+.layout-content {
+  height: calc(100vh - 56px);
+  overflow: auto;
+  background: #f5f7fb;
+}
+</style>
