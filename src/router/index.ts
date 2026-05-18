@@ -1,6 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
+import EventAnalysisView from '@/views/data-insight/EventAnalysisView.vue'
 import DashboardView from '@/views/dashboard/DashboardView.vue'
+import AssetCollectionView from '@/views/analysis-center/AssetCollectionView.vue'
+import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue'
+import DashboardListView from '@/views/analysis-center/DashboardListView.vue'
+import SavedAnalysisListView from '@/views/analysis-center/SavedAnalysisListView.vue'
 import PlaceholderPage from '@/views/PlaceholderPage.vue'
 
 const router = createRouter({
@@ -16,6 +21,38 @@ const router = createRouter({
           path: 'dashboard',
           component: DashboardView,
           meta: { title: '首页驾驶舱', module: '首页' },
+        },
+
+        // 分析中心
+        {
+          path: 'analysis-center/saved-analyses',
+          component: SavedAnalysisListView,
+          meta: { title: '保存分析', module: '分析中心' },
+        },
+        {
+          path: 'analysis-center/dashboards',
+          component: DashboardListView,
+          meta: { title: '数据看板', module: '分析中心' },
+        },
+        {
+          path: 'analysis-center/dashboards/:dashboardId',
+          component: DashboardDetailView,
+          meta: { title: '看板详情', module: '分析中心' },
+        },
+        {
+          path: 'analysis-center/recent',
+          component: AssetCollectionView,
+          meta: { title: '最近访问', module: '分析中心' },
+        },
+        {
+          path: 'analysis-center/favorites',
+          component: AssetCollectionView,
+          meta: { title: '收藏夹', module: '分析中心' },
+        },
+        {
+          path: 'analysis-center/recycle-bin',
+          component: AssetCollectionView,
+          meta: { title: '回收站', module: '分析中心' },
         },
 
         // 数据资产管理
@@ -97,8 +134,12 @@ const router = createRouter({
         // 数据洞察
         {
           path: 'data-insight/metric-analysis',
-          component: PlaceholderPage,
-          meta: { title: '指标分析', module: '数据洞察' },
+          redirect: '/data-insight/event-analysis',
+        },
+        {
+          path: 'data-insight/event-analysis',
+          component: EventAnalysisView,
+          meta: { title: '事件分析', module: '数据洞察' },
         },
         {
           path: 'data-insight/funnel',

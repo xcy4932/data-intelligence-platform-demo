@@ -20,6 +20,7 @@ import {
 import {
   AnalyticsOutline,
   BarChartOutline,
+  BookmarkOutline,
   BusinessOutline,
   GitNetworkOutline,
   HomeOutline,
@@ -58,6 +59,18 @@ const menuOptions: MenuOption[] = [
     ],
   },
   {
+    label: '分析中心',
+    key: 'analysis-center',
+    icon: renderIcon(BookmarkOutline),
+    children: [
+      { label: '保存分析', key: '/analysis-center/saved-analyses' },
+      { label: '数据看板', key: '/analysis-center/dashboards' },
+      { label: '最近访问', key: '/analysis-center/recent' },
+      { label: '收藏夹', key: '/analysis-center/favorites' },
+      { label: '回收站', key: '/analysis-center/recycle-bin' },
+    ],
+  },
+  {
     label: '元数据管理',
     key: 'metadata',
     icon: renderIcon(GitNetworkOutline),
@@ -84,7 +97,7 @@ const menuOptions: MenuOption[] = [
     key: 'data-insight',
     icon: renderIcon(PieChartOutline),
     children: [
-      { label: '指标分析', key: '/data-insight/metric-analysis' },
+      { label: '事件分析', key: '/data-insight/event-analysis' },
       { label: '漏斗分析', key: '/data-insight/funnel' },
       { label: '留存分析', key: '/data-insight/retention' },
       { label: '归因分析', key: '/data-insight/attribution' },

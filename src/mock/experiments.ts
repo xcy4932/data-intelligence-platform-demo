@@ -1,0 +1,157 @@
+import type { Experiment } from '@/types/experiment'
+
+export const experiments: Experiment[] = [
+  {
+    id: 'experiment-low-coin-ad-reward-ab',
+    name: '低金币广告激励策略 A/B 测试',
+    hypothesis: '在金币不足场景明确展示广告换金币收益，可提升广告观看率并恢复广告收入，且不损害次日留存。',
+    status: 'analyzing',
+    owner: {
+      id: 'owner-growth',
+      name: '林哲',
+      department: '增长运营团队',
+    },
+    dateRange: {
+      start: '2026-05-14',
+      end: '2026-05-21',
+    },
+    createdAt: '2026-05-13T13:40:00+02:00',
+    targetSegmentIds: ['segment-low-coin-high-active'],
+    relatedCampaignId: 'campaign-low-coin-ad-recovery',
+    groups: [
+      {
+        id: 'group-control',
+        name: 'A 组：原始提示',
+        description: '维持现有金币不足弹窗和入口样式。',
+        splitRatio: 34,
+        isControl: true,
+        sampleUsers: 15840,
+        strategySummary: '无新增奖励说明，仅提示金币不足。',
+      },
+      {
+        id: 'group-fixed-reward',
+        name: 'B 组：固定金币收益',
+        description: '弹窗明确展示看 1 条广告获得 80 金币。',
+        splitRatio: 33,
+        isControl: false,
+        sampleUsers: 15480,
+        strategySummary: '强化单次广告收益和立即继续体验的动机。',
+      },
+      {
+        id: 'group-streak-reward',
+        name: 'C 组：阶梯奖励任务',
+        description: '弹窗展示固定收益，并追加连续 3 次观看额外金币任务。',
+        splitRatio: 33,
+        isControl: false,
+        sampleUsers: 15500,
+        strategySummary: '用任务横幅鼓励多次观看，提升短期广告库存消耗。',
+      },
+    ],
+    metricResults: [
+      {
+        metricId: 'metric-ad-watch-rate',
+        metricName: '广告观看率',
+        role: 'primary',
+        baseline: 34.8,
+        groupResults: [
+          { groupId: 'group-control', value: 35.1, liftRate: 0.9, confidence: 0.58 },
+          { groupId: 'group-fixed-reward', value: 41.3, liftRate: 18.7, confidence: 0.96 },
+          { groupId: 'group-streak-reward', value: 42.1, liftRate: 21, confidence: 0.97 },
+        ],
+        winnerGroupId: 'group-streak-reward',
+      },
+      {
+        metricId: 'metric-ad-watch-count',
+        metricName: '广告观看次数',
+        role: 'primary',
+        baseline: 356920,
+        groupResults: [
+          { groupId: 'group-control', value: 361280, liftRate: 1.2, confidence: 0.54 },
+          { groupId: 'group-fixed-reward', value: 402680, liftRate: 12.8, confidence: 0.94 },
+          { groupId: 'group-streak-reward', value: 416240, liftRate: 16.6, confidence: 0.95 },
+        ],
+        winnerGroupId: 'group-streak-reward',
+      },
+      {
+        metricId: 'metric-retention-d7',
+        metricName: '7 日留存率',
+        role: 'guardrail',
+        baseline: 18.2,
+        groupResults: [
+          { groupId: 'group-control', value: 18.1, liftRate: -0.5, confidence: 0.43 },
+          { groupId: 'group-fixed-reward', value: 18.4, liftRate: 1.1, confidence: 0.61 },
+          { groupId: 'group-streak-reward', value: 18.0, liftRate: -1.1, confidence: 0.59 },
+        ],
+      },
+      {
+        metricId: 'metric-ad-revenue',
+        metricName: '广告收入',
+        role: 'diagnostic',
+        baseline: 184260,
+        groupResults: [
+          { groupId: 'group-control', value: 186140, liftRate: 1, confidence: 0.51 },
+          { groupId: 'group-fixed-reward', value: 205180, liftRate: 11.4, confidence: 0.93 },
+          { groupId: 'group-streak-reward', value: 208960, liftRate: 13.4, confidence: 0.91 },
+        ],
+        winnerGroupId: 'group-streak-reward',
+      },
+    ],
+    evaluation: {
+      decision: 'ship_variant',
+      conclusion:
+        'C 组对广告观看次数提升最高，但留存略有波动；B 组提升稳定且风险更低，建议先全量 B 组并保留 C 组继续观察。',
+      rolloutRecommendation: '先将固定金币收益弹窗扩大到 80% 低金币高活跃用户，阶梯任务保留 20% 流量观测 3 天。',
+      estimatedMonthlyImpact: 438000,
+      riskNotes: [
+        '阶梯奖励可能提升短期金币发放成本，需要监控金币通胀和后续付费转化。',
+        'Android 8.7.0 样式问题需要和客户端版本修复一起验证。',
+      ],
+    },
+  },
+  {
+    id: 'experiment-recall-coin-pack',
+    name: '高价值沉默用户金币礼包召回实验',
+    hypothesis: '限时金币礼包可以提升高价值沉默用户回流率，并带动广告激励任务参与。',
+    status: 'draft',
+    owner: {
+      id: 'owner-growth',
+      name: '林哲',
+      department: '增长运营团队',
+    },
+    dateRange: {
+      start: '2026-05-22',
+      end: '2026-05-29',
+    },
+    createdAt: '2026-05-15T15:00:00+02:00',
+    targetSegmentIds: ['segment-lapsed-high-value'],
+    relatedCampaignId: 'campaign-lapsed-value-recall',
+    groups: [
+      {
+        id: 'group-recall-control',
+        name: 'A 组：常规召回',
+        description: '发送常规回流提醒。',
+        splitRatio: 50,
+        isControl: true,
+        sampleUsers: 6420,
+        strategySummary: '无金币礼包。',
+      },
+      {
+        id: 'group-recall-coin-pack',
+        name: 'B 组：限时金币礼包',
+        description: '发送 24 小时限时金币礼包提醒。',
+        splitRatio: 50,
+        isControl: false,
+        sampleUsers: 6420,
+        strategySummary: '回流领取金币，并引导完成广告激励任务。',
+      },
+    ],
+    metricResults: [],
+    evaluation: {
+      decision: 'keep_observing',
+      conclusion: '实验尚未开始，等待广告观看恢复任务完成后启动。',
+      rolloutRecommendation: '先完成目标人群去重和 Push 频控校验。',
+      estimatedMonthlyImpact: 0,
+      riskNotes: ['需要避免与低金币广告恢复任务重复触达。'],
+    },
+  },
+]
