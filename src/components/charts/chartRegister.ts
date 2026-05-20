@@ -1,5 +1,6 @@
-import { BarChart, LineChart, PieChart } from 'echarts/charts'
+import { BarChart, FunnelChart, LineChart, PieChart } from 'echarts/charts'
 import {
+  DataZoomComponent,
   GridComponent,
   LegendComponent,
   MarkPointComponent,
@@ -11,6 +12,8 @@ import { CanvasRenderer } from 'echarts/renderers'
 use([
   BarChart,
   CanvasRenderer,
+  DataZoomComponent,
+  FunnelChart,
   GridComponent,
   LegendComponent,
   LineChart,

@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
 import EventAnalysisView from '@/views/data-insight/EventAnalysisView.vue'
+import FunnelAnalysisView from '@/views/data-insight/FunnelAnalysisView.vue'
+import RetentionAnalysisView from '@/views/data-insight/RetentionAnalysisView.vue'
 import DashboardView from '@/views/dashboard/DashboardView.vue'
 import AssetCollectionView from '@/views/analysis-center/AssetCollectionView.vue'
 import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue'
@@ -143,12 +145,12 @@ const router = createRouter({
         },
         {
           path: 'data-insight/funnel',
-          component: PlaceholderPage,
+          component: FunnelAnalysisView,
           meta: { title: '漏斗分析', module: '数据洞察' },
         },
         {
           path: 'data-insight/retention',
-          component: PlaceholderPage,
+          component: RetentionAnalysisView,
           meta: { title: '留存分析', module: '数据洞察' },
         },
         {
