@@ -1,4 +1,4 @@
-import { BarChart, FunnelChart, LineChart, PieChart } from 'echarts/charts'
+import { BarChart, FunnelChart, LineChart, PieChart, SankeyChart } from 'echarts/charts'
 import {
   DataZoomComponent,
   GridComponent,
@@ -19,5 +19,6 @@ use([
   LineChart,
   MarkPointComponent,
   PieChart,
+  SankeyChart,
   TooltipComponent,
 ])

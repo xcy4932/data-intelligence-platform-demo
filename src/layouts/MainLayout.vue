@@ -100,9 +100,11 @@ const menuOptions: MenuOption[] = [
       { label: '事件分析', key: '/data-insight/event-analysis' },
       { label: '漏斗分析', key: '/data-insight/funnel' },
       { label: '留存分析', key: '/data-insight/retention' },
+      { label: '用户路径', key: '/data-insight/user-path' },
+      { label: '热力图分析', key: '/data-insight/heatmap' },
+      { label: '分布分析', key: '/data-insight/distribution' },
       { label: '归因分析', key: '/data-insight/attribution' },
       { label: 'LTV 分析', key: '/data-insight/ltv' },
-      { label: '数据预测', key: '/data-insight/prediction' },
     ],
   },
   {

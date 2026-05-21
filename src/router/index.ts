@@ -1,8 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
 import EventAnalysisView from '@/views/data-insight/EventAnalysisView.vue'
+import AttributionAnalysisView from '@/views/data-insight/AttributionAnalysisView.vue'
+import DistributionAnalysisView from '@/views/data-insight/DistributionAnalysisView.vue'
 import FunnelAnalysisView from '@/views/data-insight/FunnelAnalysisView.vue'
+import HeatmapAnalysisView from '@/views/data-insight/HeatmapAnalysisView.vue'
+import LtvAnalysisView from '@/views/data-insight/LtvAnalysisView.vue'
 import RetentionAnalysisView from '@/views/data-insight/RetentionAnalysisView.vue'
+import UserPathAnalysisView from '@/views/data-insight/UserPathAnalysisView.vue'
 import DashboardView from '@/views/dashboard/DashboardView.vue'
 import AssetCollectionView from '@/views/analysis-center/AssetCollectionView.vue'
 import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue'
@@ -154,19 +159,29 @@ const router = createRouter({
           meta: { title: '留存分析', module: '数据洞察' },
         },
         {
+          path: 'data-insight/user-path',
+          component: UserPathAnalysisView,
+          meta: { title: '用户路径', module: '数据洞察' },
+        },
+        {
+          path: 'data-insight/heatmap',
+          component: HeatmapAnalysisView,
+          meta: { title: '热力图分析', module: '数据洞察' },
+        },
+        {
+          path: 'data-insight/distribution',
+          component: DistributionAnalysisView,
+          meta: { title: '分布分析', module: '数据洞察' },
+        },
+        {
           path: 'data-insight/attribution',
-          component: PlaceholderPage,
+          component: AttributionAnalysisView,
           meta: { title: '归因分析', module: '数据洞察' },
         },
         {
           path: 'data-insight/ltv',
-          component: PlaceholderPage,
+          component: LtvAnalysisView,
           meta: { title: 'LTV 分析', module: '数据洞察' },
-        },
-        {
-          path: 'data-insight/prediction',
-          component: PlaceholderPage,
-          meta: { title: '数据预测', module: '数据洞察' },
         },
 
         // 智能运营

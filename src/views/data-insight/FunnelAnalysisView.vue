@@ -1122,22 +1122,159 @@ const detailRows = computed<FunnelDetailRow[]>(() => {
 })
 
 const detailColumns = computed<DataTableColumns<FunnelDetailRow>>(() => {
-  const columns: DataTableColumns<FunnelDetailRow> = [
+  const actionColumn: DataTableColumns<FunnelDetailRow>[number] = {
+    title: '操作',
+    key: 'actions',
+    width: 220,
+    render: () =>
+      h(
+        NSpace,
+        { size: 8 },
+        {
+          default: () => [
+            h(NButton, { text: true, type: 'primary', onClick: () => openMicroscope() }, { default: () => '显微镜' }),
+            h(NButton, { text: true, onClick: () => openUserDrawer('converted') }, { default: () => '查看用户' }),
+            h(NButton, { text: true, onClick: () => (showSegmentModal.value = true) }, { default: () => '存为分群' }),
+          ],
+        },
+      ),
+  }
+
+  const baseColumns: DataTableColumns<FunnelDetailRow> = [
     {
       title: '分组',
       key: 'group',
       sorter: 'default',
+      fixed: 'left',
+      width: 120,
     },
     {
       title: '转化窗口',
       key: 'windowBucket',
       sorter: 'default',
+      width: 130,
     },
     {
       title: '步骤',
       key: 'stepName',
       sorter: 'default',
+      width: 160,
     },
+  ]
+
+  if (compareMode.value !== 'none') {
+    return [
+      ...baseColumns,
+      {
+        title: `当前指标：${selectedMetricLabel.value}`,
+        key: 'selectedMetricCompareGroup',
+        children: [
+          { title: '当前', key: 'selectedMetricValue', render: (row) => row.selectedMetricValue },
+          { title: '对比期', key: 'compareSelectedMetricValue', render: (row) => row.compareSelectedMetricValue ?? '-' },
+          { title: '变化', key: 'selectedMetricDelta', render: (row) => row.selectedMetricDelta ?? '-' },
+        ],
+      },
+      {
+        title: '触达用户',
+        key: 'reachedCompareGroup',
+        children: [
+          {
+            title: '当前',
+            key: 'reachedCount',
+            sorter: (rowA, rowB) => rowA.reachedCount - rowB.reachedCount,
+            render: (row) =>
+              h(
+                NButton,
+                { text: true, type: 'primary', onClick: () => openUserDrawer('reached') },
+                { default: () => row.reachedCount.toLocaleString() },
+              ),
+          },
+          { title: '对比期', key: 'compareReachedCount', render: (row) => row.compareReachedCount?.toLocaleString() ?? '-' },
+          { title: '变化', key: 'reachedCountDelta', render: (row) => row.reachedCountDelta ?? '-' },
+        ],
+      },
+      {
+        title: '流失用户',
+        key: 'lostCompareGroup',
+        children: [
+          {
+            title: '当前',
+            key: 'lostCount',
+            sorter: (rowA, rowB) => rowA.lostCount - rowB.lostCount,
+            render: (row) =>
+              h(
+                NButton,
+                { text: true, type: 'error', onClick: () => openUserDrawer('lost') },
+                { default: () => row.lostCount.toLocaleString() },
+              ),
+          },
+          { title: '对比期', key: 'compareLostCount', render: (row) => row.compareLostCount?.toLocaleString() ?? '-' },
+          { title: '变化', key: 'lostCountDelta', render: (row) => row.lostCountDelta ?? '-' },
+        ],
+      },
+      {
+        title: '上步转化率',
+        key: 'previousConversionCompareGroup',
+        children: [
+          { title: '当前', key: 'previousConversionRate', render: (row) => isFirstStepRow(row) ? '-' : `${row.previousConversionRate}%` },
+          {
+            title: '对比期',
+            key: 'comparePreviousConversionRate',
+            render: (row) => isFirstStepRow(row)
+              ? '-'
+              : row.comparePreviousConversionRate !== undefined ? `${row.comparePreviousConversionRate}%` : '-',
+          },
+          { title: '变化', key: 'previousConversionDelta', render: (row) => row.previousConversionDelta ?? '-' },
+        ],
+      },
+      {
+        title: '整体转化率',
+        key: 'overallConversionCompareGroup',
+        children: [
+          { title: '当前', key: 'overallConversionRate', render: (row) => `${row.overallConversionRate}%` },
+          { title: '对比期', key: 'compareOverallConversionRate', render: (row) => row.compareOverallConversionRate !== undefined ? `${row.compareOverallConversionRate}%` : '-' },
+          { title: '变化', key: 'overallConversionDelta', render: (row) => row.overallConversionDelta ?? '-' },
+        ],
+      },
+      {
+        title: '上步流失率',
+        key: 'previousLostCompareGroup',
+        children: [
+          { title: '当前', key: 'previousLostRate', render: (row) => isFirstStepRow(row) ? '-' : `${row.previousLostRate}%` },
+          {
+            title: '对比期',
+            key: 'comparePreviousLostRate',
+            render: (row) => isFirstStepRow(row)
+              ? '-'
+              : row.comparePreviousLostRate !== undefined ? `${row.comparePreviousLostRate}%` : '-',
+          },
+          { title: '变化', key: 'previousLostDelta', render: (row) => row.previousLostDelta ?? '-' },
+        ],
+      },
+      {
+        title: '平均耗时',
+        key: 'avgDurationCompareGroup',
+        children: [
+          { title: '当前', key: 'avgDuration', render: (row) => row.avgDuration },
+          { title: '对比期', key: 'compareAvgDuration', render: (row) => row.compareAvgDuration ?? '-' },
+          { title: '变化', key: 'avgDurationDelta', render: (row) => row.avgDurationDelta ?? '-' },
+        ],
+      },
+      {
+        title: '同时显示指标',
+        key: 'simultaneousMetricCompareGroup',
+        children: [
+          { title: '当前', key: 'simultaneousMetricValue', render: (row) => row.simultaneousMetricValue },
+          { title: '对比期', key: 'compareSimultaneousMetricValue', render: (row) => row.compareSimultaneousMetricValue ?? '-' },
+          { title: '变化', key: 'simultaneousMetricDelta', render: (row) => row.simultaneousMetricDelta ?? '-' },
+        ],
+      },
+      actionColumn,
+    ]
+  }
+
+  return [
+    ...baseColumns,
     {
       title: `当前指标：${selectedMetricLabel.value}`,
       key: 'selectedMetricValue',
@@ -1149,11 +1286,7 @@ const detailColumns = computed<DataTableColumns<FunnelDetailRow>>(() => {
       render: (row) =>
         h(
           NButton,
-          {
-            text: true,
-            type: 'primary',
-            onClick: () => openUserDrawer('reached'),
-          },
+          { text: true, type: 'primary', onClick: () => openUserDrawer('reached') },
           { default: () => row.reachedCount.toLocaleString() },
         ),
     },
@@ -1164,11 +1297,7 @@ const detailColumns = computed<DataTableColumns<FunnelDetailRow>>(() => {
       render: (row) =>
         h(
           NButton,
-          {
-            text: true,
-            type: 'error',
-            onClick: () => openUserDrawer('lost'),
-          },
+          { text: true, type: 'error', onClick: () => openUserDrawer('lost') },
           { default: () => row.lostCount.toLocaleString() },
         ),
     },
@@ -1190,126 +1319,10 @@ const detailColumns = computed<DataTableColumns<FunnelDetailRow>>(() => {
       sorter: (rowA, rowB) => rowA.previousLostRate - rowB.previousLostRate,
       render: (row) => isFirstStepRow(row) ? '-' : `${row.previousLostRate}%`,
     },
-    {
-      title: '平均耗时',
-      key: 'avgDuration',
-    },
-    {
-      title: '同时显示指标',
-      key: 'simultaneousMetricValue',
-    },
+    { title: '平均耗时', key: 'avgDuration' },
+    { title: '同时显示指标', key: 'simultaneousMetricValue' },
+    actionColumn,
   ]
-
-  if (compareMode.value !== 'none') {
-    columns.splice(
-      4,
-      0,
-      {
-        title: `对比期当前指标`,
-        key: 'compareSelectedMetricValue',
-        render: (row) => row.compareSelectedMetricValue ?? '-',
-      },
-      {
-        title: '当前指标变化',
-        key: 'selectedMetricDelta',
-        render: (row) => row.selectedMetricDelta ?? '-',
-      },
-      {
-        title: '对比期触达用户',
-        key: 'compareReachedCount',
-        render: (row) => row.compareReachedCount?.toLocaleString() ?? '-',
-      },
-      {
-        title: '触达变化',
-        key: 'reachedCountDelta',
-        render: (row) => row.reachedCountDelta ?? '-',
-      },
-      {
-        title: '对比期流失用户',
-        key: 'compareLostCount',
-        render: (row) => row.compareLostCount?.toLocaleString() ?? '-',
-      },
-      {
-        title: '流失变化',
-        key: 'lostCountDelta',
-        render: (row) => row.lostCountDelta ?? '-',
-      },
-      {
-        title: '对比期上步转化率',
-        key: 'comparePreviousConversionRate',
-        render: (row) => isFirstStepRow(row)
-          ? '-'
-          : row.comparePreviousConversionRate !== undefined ? `${row.comparePreviousConversionRate}%` : '-',
-      },
-      {
-        title: '上步转化变化',
-        key: 'previousConversionDelta',
-        render: (row) => row.previousConversionDelta ?? '-',
-      },
-      {
-        title: '对比期整体转化率',
-        key: 'compareOverallConversionRate',
-        render: (row) => row.compareOverallConversionRate !== undefined ? `${row.compareOverallConversionRate}%` : '-',
-      },
-      {
-        title: '整体转化变化',
-        key: 'overallConversionDelta',
-        render: (row) => row.overallConversionDelta ?? '-',
-      },
-      {
-        title: '对比期上步流失率',
-        key: 'comparePreviousLostRate',
-        render: (row) => isFirstStepRow(row)
-          ? '-'
-          : row.comparePreviousLostRate !== undefined ? `${row.comparePreviousLostRate}%` : '-',
-      },
-      {
-        title: '上步流失变化',
-        key: 'previousLostDelta',
-        render: (row) => row.previousLostDelta ?? '-',
-      },
-      {
-        title: '对比期平均耗时',
-        key: 'compareAvgDuration',
-        render: (row) => row.compareAvgDuration ?? '-',
-      },
-      {
-        title: '平均耗时变化',
-        key: 'avgDurationDelta',
-        render: (row) => row.avgDurationDelta ?? '-',
-      },
-      {
-        title: '对比期同时显示指标',
-        key: 'compareSimultaneousMetricValue',
-        render: (row) => row.compareSimultaneousMetricValue ?? '-',
-      },
-      {
-        title: '同时显示指标变化',
-        key: 'simultaneousMetricDelta',
-        render: (row) => row.simultaneousMetricDelta ?? '-',
-      },
-    )
-  }
-
-  columns.push({
-    title: '操作',
-    key: 'actions',
-    width: 220,
-    render: () =>
-      h(
-        NSpace,
-        { size: 8 },
-        {
-          default: () => [
-            h(NButton, { text: true, type: 'primary', onClick: () => openMicroscope() }, { default: () => '显微镜' }),
-            h(NButton, { text: true, onClick: () => openUserDrawer('converted') }, { default: () => '查看用户' }),
-            h(NButton, { text: true, onClick: () => (showSegmentModal.value = true) }, { default: () => '存为分群' }),
-          ],
-        },
-      ),
-  })
-
-  return columns
 })
 
 const userColumns: DataTableColumns<FunnelUserRecord> = [
@@ -3284,6 +3297,20 @@ onMounted(() => {
             </n-space>
           </div>
 
+          <div
+            v-if="analysisMode === 'steps' && chartType !== 'bar' && chartStepSeries.length"
+            class="funnel-chart-legend"
+          >
+            <n-tag
+              v-for="(series, index) in chartStepSeries"
+              :key="series.name"
+              :bordered="false"
+              :type="index === 0 ? 'success' : 'info'"
+            >
+              {{ index === 0 ? '当前图表' : `对照图表 ${index}` }}：{{ series.name }}
+            </n-tag>
+          </div>
+
           <n-spin :show="loading">
             <div
               v-if="result && analysisMode === 'steps' && chartType !== 'bar' && chartStepSeries.length > 1"
@@ -4152,6 +4179,13 @@ onMounted(() => {
 
 .chart-head {
   margin-bottom: 12px;
+}
+
+.funnel-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 12px;
 }
 
 .funnel-chart-title-grid {
