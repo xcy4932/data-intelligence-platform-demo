@@ -13,6 +13,8 @@ import AssetCollectionView from '@/views/analysis-center/AssetCollectionView.vue
 import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue'
 import DashboardListView from '@/views/analysis-center/DashboardListView.vue'
 import SavedAnalysisListView from '@/views/analysis-center/SavedAnalysisListView.vue'
+import DataConnectionsView from '@/views/metadata/DataConnectionsView.vue'
+import IdMappingView from '@/views/metadata/IdMappingView.vue'
 import PlaceholderPage from '@/views/PlaceholderPage.vue'
 
 const router = createRouter({
@@ -106,14 +108,109 @@ const router = createRouter({
           meta: { title: '维度管理', module: '元数据管理' },
         },
         {
-          path: 'metadata/data-sources',
-          component: PlaceholderPage,
-          meta: { title: '数据源管理', module: '元数据管理' },
-        },
-        {
           path: 'metadata/reports',
           component: PlaceholderPage,
           meta: { title: '报表管理', module: '元数据管理' },
+        },
+        {
+          path: 'data-fusion/connections',
+          component: DataConnectionsView,
+          meta: { title: '数据连接', module: '元数据管理', connectionMode: 'list' },
+        },
+        {
+          path: 'data-fusion/connections/new',
+          component: DataConnectionsView,
+          meta: { title: '新建数据连接', module: '元数据管理', connectionMode: 'select' },
+        },
+        {
+          path: 'data-fusion/connections/new/:connectorType',
+          component: DataConnectionsView,
+          meta: { title: '配置数据连接', module: '元数据管理', connectionMode: 'create' },
+        },
+        {
+          path: 'data-fusion/connections/:connectionId/edit',
+          component: DataConnectionsView,
+          meta: { title: '编辑数据连接', module: '元数据管理', connectionMode: 'edit' },
+        },
+        {
+          path: 'data-fusion/connections/:connectionId/ingestion',
+          component: DataConnectionsView,
+          meta: { title: '接入任务', module: '元数据管理', connectionMode: 'detail', activeTab: 'assets' },
+        },
+        {
+          path: 'data-fusion/connections/:connectionId/runs',
+          component: DataConnectionsView,
+          meta: { title: '运行记录', module: '元数据管理', connectionMode: 'detail', activeTab: 'runs' },
+        },
+        {
+          path: 'data-fusion/connections/:connectionId/assets',
+          component: DataConnectionsView,
+          meta: { title: '连接产物', module: '元数据管理', connectionMode: 'detail', activeTab: 'assets' },
+        },
+        {
+          path: 'data-fusion/connections/:connectionId/lineage',
+          component: DataConnectionsView,
+          meta: { title: '数据连接血缘', module: '元数据管理', connectionMode: 'detail', activeTab: 'lineage' },
+        },
+        {
+          path: 'data-fusion/connections/:connectionId',
+          component: DataConnectionsView,
+          meta: { title: '数据连接详情', module: '元数据管理', connectionMode: 'detail' },
+        },
+        {
+          path: 'data-fusion/id-mapping',
+          component: IdMappingView,
+          meta: { title: 'ID 图谱构建', module: '元数据管理', idmTab: 'home' },
+        },
+        {
+          path: 'data-fusion/id-mapping/subjects',
+          component: IdMappingView,
+          meta: { title: '主体管理', module: '元数据管理', idmTab: 'home' },
+        },
+        {
+          path: 'data-fusion/id-mapping/subjects/:subjectId/oneid',
+          component: IdMappingView,
+          meta: { title: 'OneID 探查', module: '元数据管理', idmTab: 'explore' },
+        },
+        {
+          path: 'data-fusion/id-mapping/subjects/:subjectId/ids',
+          component: IdMappingView,
+          meta: { title: 'ID 类型配置', module: '元数据管理', idmTab: 'ids' },
+        },
+        {
+          path: 'data-fusion/id-mapping/subjects/:subjectId/relations',
+          component: IdMappingView,
+          meta: { title: '参考关系配置', module: '元数据管理', idmTab: 'relations' },
+        },
+        {
+          path: 'data-fusion/id-mapping/subjects/:subjectId/graph',
+          component: IdMappingView,
+          meta: { title: 'OneID 图谱', module: '元数据管理', idmTab: 'graph' },
+        },
+        {
+          path: 'data-fusion/id-mapping/cross-subject-relations',
+          component: IdMappingView,
+          meta: { title: '多主体关系', module: '元数据管理', idmTab: 'cross' },
+        },
+        {
+          path: 'data-fusion/id-mapping/tasks',
+          component: IdMappingView,
+          meta: { title: 'ID-Mapping 任务', module: '元数据管理', idmTab: 'tasks' },
+        },
+        {
+          path: 'data-fusion/id-mapping/lineage',
+          component: IdMappingView,
+          meta: { title: 'ID 血缘管理', module: '元数据管理', idmTab: 'lineage' },
+        },
+        {
+          path: 'data-fusion/id-mapping/explore',
+          component: IdMappingView,
+          meta: { title: 'ID 数据探查', module: '元数据管理', idmTab: 'explore' },
+        },
+        {
+          path: 'data-fusion/id-mapping/settings',
+          component: IdMappingView,
+          meta: { title: 'ID-Mapping 高级配置', module: '元数据管理', idmTab: 'settings' },
         },
 
         // 用户洞察

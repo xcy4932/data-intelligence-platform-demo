@@ -77,8 +77,9 @@ const menuOptions: MenuOption[] = [
     children: [
       { label: '指标管理', key: '/metadata/metrics' },
       { label: '维度管理', key: '/metadata/dimensions' },
-      { label: '数据源管理', key: '/metadata/data-sources' },
       { label: '报表管理', key: '/metadata/reports' },
+      { label: '数据连接', key: '/data-fusion/connections' },
+      { label: 'ID 图谱构建', key: '/data-fusion/id-mapping' },
     ],
   },
   {
