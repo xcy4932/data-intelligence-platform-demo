@@ -466,6 +466,7 @@ export interface AffectedUser {
 
 export interface EventAnalysisQueryConfig {
   templateId: string
+  datasetId?: string
   timeRange: TimeRangeConfig
   metricConfigs: EventMetricConfig[]
   formulaMetrics: CustomFormulaMetric[]
@@ -626,6 +627,8 @@ export interface DownloadTask {
   format: DownloadFormat
   status: 'created' | 'running' | 'completed'
   createdAt: string
+  masked?: boolean
+  auditNote?: string
 }
 
 export interface MockActionResult {

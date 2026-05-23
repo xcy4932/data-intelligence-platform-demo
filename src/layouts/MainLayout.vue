@@ -75,6 +75,7 @@ const menuOptions: MenuOption[] = [
     key: 'metadata',
     icon: renderIcon(GitNetworkOutline),
     children: [
+      { label: '数据集', key: '/metadata/datasets' },
       { label: '指标管理', key: '/metadata/metrics' },
       { label: '维度管理', key: '/metadata/dimensions' },
       { label: '报表管理', key: '/metadata/reports' },

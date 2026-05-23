@@ -14,6 +14,9 @@ import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue
 import DashboardListView from '@/views/analysis-center/DashboardListView.vue'
 import SavedAnalysisListView from '@/views/analysis-center/SavedAnalysisListView.vue'
 import DataConnectionsView from '@/views/metadata/DataConnectionsView.vue'
+import DatasetDetailView from '@/views/metadata/DatasetDetailView.vue'
+import DatasetListView from '@/views/metadata/DatasetListView.vue'
+import DatasetsView from '@/views/metadata/DatasetsView.vue'
 import IdMappingView from '@/views/metadata/IdMappingView.vue'
 import PlaceholderPage from '@/views/PlaceholderPage.vue'
 
@@ -97,6 +100,21 @@ const router = createRouter({
         },
 
         // 元数据管理
+        {
+          path: 'metadata/datasets',
+          component: DatasetListView,
+          meta: { title: '数据集', module: '元数据管理' },
+        },
+        {
+          path: 'metadata/datasets/create',
+          component: DatasetsView,
+          meta: { title: '创建数据集', module: '元数据管理' },
+        },
+        {
+          path: 'metadata/datasets/:datasetId',
+          component: DatasetDetailView,
+          meta: { title: '数据集详情', module: '元数据管理' },
+        },
         {
           path: 'metadata/metrics',
           component: PlaceholderPage,

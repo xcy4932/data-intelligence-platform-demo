@@ -40,7 +40,9 @@ import EventResultTable from '@/components/charts/EventResultTable.vue'
 import FormulaDisplayConfig from '@/components/business/formula-editor/FormulaDisplayConfig.vue'
 import FormulaEditorPanel from '@/components/business/formula-editor/FormulaEditor.vue'
 import MetricConditionPicker from '@/components/business/formula-editor/MetricConditionPicker.vue'
+import { datasetService } from '@/services/datasetService'
 import { eventAnalysisService } from '@/services/eventAnalysisService'
+import type { DataMaskRule } from '@/types/dataset'
 import type {
   AffectedUser,
   AnalysisConfigState,
@@ -114,6 +116,7 @@ const defaultChartConfig: ChartConfig = {
 }
 
 const router = useRouter()
+const analysisDatasetId = 'ds_low_coin_behavior_assoc'
 
 const queryState = ref<AnalysisQueryState>('idle')
 const configState = ref<AnalysisConfigState>('saved')
@@ -169,6 +172,7 @@ const chartConfig = ref<ChartConfig>({ ...defaultChartConfig })
 const result = ref<EventAnalysisResult | null>(null)
 const affectedUsers = ref<AffectedUser[]>([])
 const dashboardLocations = ref<DashboardLocation[]>([])
+const sensitiveMaskRules = ref<DataMaskRule[]>([])
 
 const downloadRange = ref<DownloadRange>('page_result')
 const downloadContents = ref<DownloadContent[]>(['chart_data', 'detail_data'])
@@ -402,6 +406,18 @@ const userTagValueGetters: Record<string, (user: AffectedUser) => string> = {
   task_sensitivity: (user: AffectedUser) => user.adWatchDeclineRate3d < -50 ? '高' : '中',
 }
 
+function isSensitiveAnalysisField(field: string): boolean {
+  return sensitiveMaskRules.value.some((rule) => rule.enabled && rule.fieldName === field) ||
+    datasetService.isFieldMaskedForCurrentUser(analysisDatasetId, field, 'visual_query')
+}
+
+function isSensitiveFilterField(sourceType: FilterSourceType, field: string): boolean {
+  if (sourceType === 'segment' || sourceType === 'behavior' || sourceType === 'dynamic_match') {
+    return false
+  }
+  return isSensitiveAnalysisField(field)
+}
+
 interface UserProfileFieldOption {
   label: string
   value: string
@@ -551,25 +567,28 @@ const metricDraftStatus = computed(() => {
 
 const metricOperatorOptions = computed<Array<SelectOption & { value: MetricOperator }>>(() => {
   const hasNumericProperty = numericPropertyOptions.value.length > 0
+  const selectedSensitiveProperty = Boolean(metricDraft.value.propertyName && isSensitiveAnalysisField(metricDraft.value.propertyName))
+  const disableForSensitive = (operator: MetricOperator): boolean =>
+    selectedSensitiveProperty && !['PV', 'UV', 'MAX', 'MIN', 'DISTINCT_COUNT', 'DISTINCT_USER_PROPERTY'].includes(operator)
 
   return [
     { label: 'PV 总次数', value: 'PV' },
     { label: 'UV 触发用户数', value: 'UV' },
-    { label: 'PV/UV 人均次数', value: 'PV_UV' },
-    { label: 'UV/AU 渗透率', value: 'UV_AU' },
-    { label: 'SUM 求和', value: 'SUM', disabled: !hasNumericProperty },
-    { label: 'AVG 平均值', value: 'AVG', disabled: !hasNumericProperty },
+    { label: 'PV/UV 人均次数', value: 'PV_UV', disabled: disableForSensitive('PV_UV') },
+    { label: 'UV/AU 渗透率', value: 'UV_AU', disabled: disableForSensitive('UV_AU') },
+    { label: 'SUM 求和', value: 'SUM', disabled: !hasNumericProperty || disableForSensitive('SUM') },
+    { label: 'AVG 平均值', value: 'AVG', disabled: !hasNumericProperty || disableForSensitive('AVG') },
     { label: 'MAX 最大值', value: 'MAX', disabled: !hasNumericProperty },
     { label: 'MIN 最小值', value: 'MIN', disabled: !hasNumericProperty },
-    { label: 'PER_USER_AVG 人均值', value: 'PER_USER_AVG', disabled: !hasNumericProperty },
-    { label: 'P25 下四分位数', value: 'PERCENTILE_25', disabled: !hasNumericProperty },
-    { label: 'P50 中位数', value: 'PERCENTILE_50', disabled: !hasNumericProperty },
-    { label: 'P75 上四分位数', value: 'PERCENTILE_75', disabled: !hasNumericProperty },
-    { label: 'P90 分位数', value: 'PERCENTILE_90', disabled: !hasNumericProperty },
+    { label: 'PER_USER_AVG 人均值', value: 'PER_USER_AVG', disabled: !hasNumericProperty || disableForSensitive('PER_USER_AVG') },
+    { label: 'P25 下四分位数', value: 'PERCENTILE_25', disabled: !hasNumericProperty || disableForSensitive('PERCENTILE_25') },
+    { label: 'P50 中位数', value: 'PERCENTILE_50', disabled: !hasNumericProperty || disableForSensitive('PERCENTILE_50') },
+    { label: 'P75 上四分位数', value: 'PERCENTILE_75', disabled: !hasNumericProperty || disableForSensitive('PERCENTILE_75') },
+    { label: 'P90 分位数', value: 'PERCENTILE_90', disabled: !hasNumericProperty || disableForSensitive('PERCENTILE_90') },
     { label: 'DISTINCT_COUNT 属性去重数', value: 'DISTINCT_COUNT' },
     { label: 'DISTINCT_USER_PROPERTY 属性与用户去重', value: 'DISTINCT_USER_PROPERTY' },
-    { label: 'CUSTOM 自定义', value: 'CUSTOM' },
-    { label: 'FORMULA 公式', value: 'FORMULA' },
+    { label: 'CUSTOM 自定义', value: 'CUSTOM', disabled: disableForSensitive('CUSTOM') },
+    { label: 'FORMULA 公式', value: 'FORMULA', disabled: disableForSensitive('FORMULA') },
   ]
 })
 
@@ -867,6 +886,10 @@ const getOperatorOptionsByField = (
   }
 
   if (sourceType === 'dynamic_match') {
+    return allFilterOperatorOptions.filter((option) => ['equals', 'in'].includes(option.value))
+  }
+
+  if (isSensitiveFilterField(sourceType, field)) {
     return allFilterOperatorOptions.filter((option) => ['equals', 'in'].includes(option.value))
   }
 
@@ -1483,6 +1506,7 @@ const buildQueryConfig = (): EventAnalysisQueryConfig | null => {
 
   return {
     templateId: selectedTemplateId.value,
+    datasetId: analysisDatasetId,
     timeRange: template.value.timeRange,
     metricConfigs: template.value.metricConfigs,
     formulaMetrics: template.value.formulaMetrics,
@@ -1953,6 +1977,22 @@ const handleMetricOperatorChange = (rawValue: string): void => {
   updateMetricNameIfDefault()
 }
 
+const handleMetricPropertyChange = (rawValue: string): void => {
+  const fieldName = rawValue
+  const needsRestrictedOperator =
+    fieldName && isSensitiveAnalysisField(fieldName) &&
+    !['PV', 'UV', 'MAX', 'MIN', 'DISTINCT_COUNT', 'DISTINCT_USER_PROPERTY'].includes(metricDraft.value.operator)
+  metricDraft.value = {
+    ...metricDraft.value,
+    propertyName: fieldName,
+    operator: needsRestrictedOperator ? 'DISTINCT_COUNT' : metricDraft.value.operator,
+    unit: needsRestrictedOperator ? '个' : metricDraft.value.unit,
+  }
+  if (needsRestrictedOperator) {
+    actionNotice.value = '涉敏字段作为指标时已自动切换为去重计数。'
+  }
+}
+
 const parseFilterValue = (rawValue: string, operator: FilterOperator): string | number | string[] => {
   if (operator === 'between') {
     return rawValue
@@ -2037,6 +2077,10 @@ const validateFilterDraft = (filter: FilterCondition, rawValue: string): string 
 
   if (!filter.operator) {
     return '筛选操作符不能为空'
+  }
+
+  if (isSensitiveFilterField(filter.sourceType, filter.field) && !['equals', 'in'].includes(filter.operator)) {
+    return '涉敏字段作为筛选项时仅支持精确筛选'
   }
 
   if (!rawValue.trim()) {
@@ -2149,6 +2193,14 @@ const validateMetricConfig = (metric: EventMetricConfig, excludeMetricId = ''): 
 
   if (propertyMetricOperators.includes(metric.operator) && !metric.propertyName) {
     return '该算子必须选择属性'
+  }
+
+  if (
+    metric.propertyName &&
+    isSensitiveAnalysisField(metric.propertyName) &&
+    !['PV', 'UV', 'MAX', 'MIN', 'DISTINCT_COUNT', 'DISTINCT_USER_PROPERTY'].includes(metric.operator)
+  ) {
+    return '涉敏字段作为指标时仅支持计数、去重计数、最大值和最小值'
   }
 
   const invalidFilter = metric.filters.find(
@@ -3493,10 +3545,11 @@ const loadPageData = async (): Promise<void> => {
   errorMessage.value = ''
 
   try {
-    const [metadataData, defaultTemplate, dashboardData] = await Promise.all([
+    const [metadataData, defaultTemplate, dashboardData, maskingRules] = await Promise.all([
       eventAnalysisService.getEventMetadata(),
       eventAnalysisService.getDefaultTemplate(),
       eventAnalysisService.getDashboardLocations(),
+      datasetService.listMaskRules(analysisDatasetId),
     ])
 
     metadata.value = metadataData
@@ -3505,6 +3558,7 @@ const loadPageData = async (): Promise<void> => {
     selectedEventName.value = defaultTemplate.primaryEventName
     selectedMetricId.value = defaultTemplate.primaryMetricId
     chartConfig.value = { ...defaultTemplate.chartConfig }
+    sensitiveMaskRules.value = maskingRules
     customTimeRangeValue.value = [
       dayjs(defaultTemplate.timeRange.startDate).valueOf(),
       dayjs(defaultTemplate.timeRange.endDate).valueOf(),
@@ -3816,8 +3870,8 @@ const submitDownload = async (): Promise<void> => {
   showDownloadModal.value = false
   actionNotice.value =
     task.range === 'page_result'
-      ? '页面结果下载任务已生成。'
-      : '更多数据下载任务已创建，完成后将通过通知中心提醒。'
+      ? `页面结果下载任务已生成。${task.masked ? '已应用脱敏并记录审计。' : ''}`
+      : `更多数据下载任务已创建，完成后将通过通知中心提醒。${task.masked ? '已应用脱敏并记录审计。' : ''}`
 }
 
 const getDashboardDefaultName = (saveObject: DashboardWidgetSaveObject): string => {
@@ -4684,6 +4738,7 @@ onMounted(() => {
 
     <n-modal v-model:show="showDownloadModal" preset="card" title="下载数据" class="small-modal">
       <n-space vertical>
+        <n-alert type="info">下载任务会在服务端按当前用户权限执行字段脱敏，并写入审计日志。</n-alert>
         <n-select
           v-model:value="downloadRange"
           :options="[
@@ -5083,11 +5138,12 @@ onMounted(() => {
         />
         <n-select
           v-if="metricNeedsProperty"
-          v-model:value="metricDraft.propertyName"
+          :value="metricDraft.propertyName"
           :options="metricPropertyOptions"
           clearable
           filterable
           placeholder="SUM / AVG / P90 / 去重算子需要选择属性"
+          @update:value="(value) => handleMetricPropertyChange(String(value ?? ''))"
         />
         <n-input v-model:value="metricDraft.unit" placeholder="单位，如 次 / 人 / %" />
         <n-space align="center">
