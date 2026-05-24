@@ -1,10 +1,24 @@
-import { BarChart, FunnelChart, LineChart, PieChart, SankeyChart } from 'echarts/charts'
+import {
+  BarChart,
+  FunnelChart,
+  GaugeChart,
+  LineChart,
+  MapChart,
+  PieChart,
+  RadarChart,
+  SankeyChart,
+  ScatterChart,
+} from 'echarts/charts'
 import {
   DataZoomComponent,
+  GeoComponent,
   GridComponent,
   LegendComponent,
+  MarkLineComponent,
   MarkPointComponent,
+  RadarComponent,
   TooltipComponent,
+  VisualMapComponent,
 } from 'echarts/components'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -14,11 +28,19 @@ use([
   CanvasRenderer,
   DataZoomComponent,
   FunnelChart,
+  GaugeChart,
+  GeoComponent,
   GridComponent,
   LegendComponent,
+  MapChart,
+  MarkLineComponent,
   LineChart,
   MarkPointComponent,
   PieChart,
+  RadarChart,
+  RadarComponent,
   SankeyChart,
+  ScatterChart,
   TooltipComponent,
+  VisualMapComponent,
 ])

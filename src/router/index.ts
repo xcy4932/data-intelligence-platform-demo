@@ -12,12 +12,20 @@ import DashboardView from '@/views/dashboard/DashboardView.vue'
 import AssetCollectionView from '@/views/analysis-center/AssetCollectionView.vue'
 import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue'
 import DashboardListView from '@/views/analysis-center/DashboardListView.vue'
+import SqlQueryWorkbenchPage from '@/views/analysis-center/SqlQueryWorkbenchPage.vue'
+import SqlVisualQueryPage from '@/views/analysis-center/SqlVisualQueryPage.vue'
+import VisualQueryPage from '@/views/analysis-center/VisualQueryPage.vue'
 import SavedAnalysisListView from '@/views/analysis-center/SavedAnalysisListView.vue'
 import DataConnectionsView from '@/views/metadata/DataConnectionsView.vue'
 import DatasetDetailView from '@/views/metadata/DatasetDetailView.vue'
 import DatasetListView from '@/views/metadata/DatasetListView.vue'
 import DatasetsView from '@/views/metadata/DatasetsView.vue'
 import IdMappingView from '@/views/metadata/IdMappingView.vue'
+import VisualModelingDetailPage from '@/views/metadata/VisualModelingDetailPage.vue'
+import VisualModelingEditorPage from '@/views/metadata/VisualModelingEditorPage.vue'
+import VisualModelingMigrationPage from '@/views/metadata/VisualModelingMigrationPage.vue'
+import VisualModelingRecycleBinPage from '@/views/metadata/VisualModelingRecycleBinPage.vue'
+import VisualModelingTaskListPage from '@/views/metadata/VisualModelingTaskListPage.vue'
 import PlaceholderPage from '@/views/PlaceholderPage.vue'
 
 const router = createRouter({
@@ -35,36 +43,51 @@ const router = createRouter({
           meta: { title: '首页驾驶舱', module: '首页' },
         },
 
-        // 分析中心
+        // 可视化分析
+        {
+          path: 'analysis-center/visual-query',
+          component: VisualQueryPage,
+          meta: { title: '数据可视化', module: '可视化分析' },
+        },
         {
           path: 'analysis-center/saved-analyses',
           component: SavedAnalysisListView,
-          meta: { title: '保存分析', module: '分析中心' },
+          meta: { title: '保存分析', module: '可视化分析' },
         },
         {
           path: 'analysis-center/dashboards',
           component: DashboardListView,
-          meta: { title: '数据看板', module: '分析中心' },
+          meta: { title: '仪表盘', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/sql-query',
+          component: SqlQueryWorkbenchPage,
+          meta: { title: 'SQL 查询', module: '可视化分析' },
+        },
+        {
+          path: 'visual-query/create',
+          component: SqlVisualQueryPage,
+          meta: { title: '可视化查询', module: '可视化分析' },
         },
         {
           path: 'analysis-center/dashboards/:dashboardId',
           component: DashboardDetailView,
-          meta: { title: '看板详情', module: '分析中心' },
+          meta: { title: '仪表盘详情', module: '可视化分析' },
         },
         {
           path: 'analysis-center/recent',
           component: AssetCollectionView,
-          meta: { title: '最近访问', module: '分析中心' },
+          meta: { title: '最近访问', module: '可视化分析' },
         },
         {
           path: 'analysis-center/favorites',
           component: AssetCollectionView,
-          meta: { title: '收藏夹', module: '分析中心' },
+          meta: { title: '收藏夹', module: '可视化分析' },
         },
         {
           path: 'analysis-center/recycle-bin',
           component: AssetCollectionView,
-          meta: { title: '回收站', module: '分析中心' },
+          meta: { title: '回收站', module: '可视化分析' },
         },
 
         // 数据资产管理
@@ -129,6 +152,31 @@ const router = createRouter({
           path: 'metadata/reports',
           component: PlaceholderPage,
           meta: { title: '报表管理', module: '元数据管理' },
+        },
+        {
+          path: 'metadata/visual-modeling',
+          component: VisualModelingTaskListPage,
+          meta: { title: '可视化建模', module: '元数据管理' },
+        },
+        {
+          path: 'metadata/visual-modeling/recycle-bin',
+          component: VisualModelingRecycleBinPage,
+          meta: { title: '可视化建模回收站', module: '元数据管理' },
+        },
+        {
+          path: 'metadata/visual-modeling/migration',
+          component: VisualModelingMigrationPage,
+          meta: { title: '可视化建模资源迁移', module: '元数据管理' },
+        },
+        {
+          path: 'visual-modeling/tasks/:taskId/edit',
+          component: VisualModelingEditorPage,
+          meta: { title: '可视化建模编辑器', module: '元数据管理' },
+        },
+        {
+          path: 'visual-modeling/tasks/:taskId/detail',
+          component: VisualModelingDetailPage,
+          meta: { title: '可视化建模详情', module: '元数据管理' },
         },
         {
           path: 'data-fusion/connections',

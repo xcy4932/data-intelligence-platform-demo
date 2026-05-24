@@ -43,7 +43,7 @@ const pageCopy = computed(() => {
   if (mode.value === 'favorites') {
     return {
       title: '收藏夹',
-      description: '管理你主动收藏的重要保存分析和数据看板。',
+      description: '管理你主动收藏的重要保存分析和仪表盘。',
       empty: '暂无收藏内容。',
     }
   }
@@ -58,23 +58,23 @@ const pageCopy = computed(() => {
 
   return {
     title: '最近访问',
-    description: '快速回到近期使用的保存分析和数据看板。',
+    description: '快速回到近期使用的保存分析和仪表盘。',
     empty: '暂无最近访问记录。',
   }
 })
 
 const typeLabelMap: Record<AnalysisCenterAssetType, string> = {
   saved_analysis: '保存分析',
-  dashboard: '数据看板',
-  dashboard_widget: '看板组件',
+  dashboard: '仪表盘',
+  dashboard_widget: '仪表盘组件',
   temporary_query: '临时查询',
 }
 
 const typeOptions: SelectOption[] = [
   { label: '全部类型', value: 'all' },
   { label: '保存分析', value: 'saved_analysis' },
-  { label: '数据看板', value: 'dashboard' },
-  { label: '看板组件', value: 'dashboard_widget' },
+  { label: '仪表盘', value: 'dashboard' },
+  { label: '仪表盘组件', value: 'dashboard_widget' },
   { label: '临时查询', value: 'temporary_query' },
 ]
 

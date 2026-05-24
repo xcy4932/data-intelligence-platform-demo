@@ -169,7 +169,7 @@ export const mockAnalysisCenterSpaces: AnalysisCenterSpace[] = [
     id: 'space-team-operation',
     name: '运营团队空间',
     type: 'team',
-    description: '运营团队共享保存分析和数据看板。',
+    description: '运营团队共享保存分析和仪表盘。',
     ownerName: 'Mia Chen',
     assetCount: 6,
     canWrite: true,
@@ -181,7 +181,7 @@ export const mockAnalysisCenterSpaces: AnalysisCenterSpace[] = [
     id: 'space-team-data',
     name: '数据分析团队',
     type: 'team',
-    description: '数据分析团队沉淀复盘看板和专题分析。',
+    description: '数据分析团队沉淀复盘仪表盘和专题分析。',
     ownerName: 'Chaoyang Xu',
     assetCount: 3,
     canWrite: true,
@@ -332,7 +332,7 @@ const createWidgets = (dashboardId: string, template: DashboardLayoutTemplate): 
     {
       id: `${dashboardId}-w5`,
       title: '广告明细 Top 分组',
-      description: '看板明细表组件，保存自事件分析表格。',
+      description: '仪表盘明细表组件，保存自事件分析表格。',
       widgetType: 'table',
       chartType: 'table',
       sourceAnalysisId: 'analysis-ad-watch-drop',
@@ -381,8 +381,10 @@ const createDashboard = (
 
   return {
     id,
+    type: overrides.type ?? 'normal',
     name,
-    description: overrides.description ?? '保存到看板的数据概览，用于日常监控和复盘。',
+    description: overrides.description ?? '保存到仪表盘的数据概览，用于日常监控和复盘。',
+    folderId: overrides.folderId,
     spaceType,
     spaceId: overrides.spaceId ?? (spaceType === 'team' ? 'space-team-operation' : spaceType === 'public' ? 'space-public' : 'space-personal'),
     spaceName: overrides.spaceName ?? (spaceType === 'team' ? '运营团队空间' : spaceType === 'public' ? '公共空间' : '个人空间'),
@@ -391,6 +393,8 @@ const createDashboard = (
     ownerName: overrides.ownerName ?? 'Chaoyang Xu',
     tags: overrides.tags ?? ['广告', '运营监控'],
     status: overrides.status ?? (errorWidgetCount > 0 ? 'has_error_widget' : 'normal'),
+    groupType: overrides.groupType,
+    webConfig: overrides.webConfig,
     widgetCount: widgets.length,
     errorWidgetCount,
     lastRefreshedAt: overrides.lastRefreshedAt ?? updatedAt,
@@ -405,12 +409,12 @@ const createDashboard = (
 }
 
 export const mockDashboardAssets: DashboardAsset[] = [
-  createDashboard('dash-ad-operation', '广告运营监控看板', 'personal', 'private', 'operation_monitoring', '2026-05-18T15:10:00+02:00', {
+  createDashboard('dash-ad-operation', '广告运营监控仪表盘', 'personal', 'private', 'operation_monitoring', '2026-05-18T15:10:00+02:00', {
     description: '包含广告观看次数趋势、广告完成率、广告收益和低金币用户分布等组件。',
     favorite: true,
     tags: ['广告', '运营监控', '低金币'],
   }),
-  createDashboard('dash-team-retention', '新用户留存看板', 'team', 'team', 'retention_analysis', '2026-05-17T18:20:00+02:00', {
+  createDashboard('dash-team-retention', '新用户留存仪表盘', 'team', 'team', 'retention_analysis', '2026-05-17T18:20:00+02:00', {
     ownerName: 'Mia Chen',
     ownerId: 'u_mia',
     tags: ['留存', '新用户'],
@@ -421,9 +425,23 @@ export const mockDashboardAssets: DashboardAsset[] = [
   createDashboard('dash-executive', '经营管理层概览', 'public', 'public', 'executive_overview', '2026-05-15T09:40:00+02:00', {
     tags: ['管理层', '运营监控'],
   }),
-  createDashboard('dash-empty-draft', '临时分析看板草稿', 'personal', 'private', 'blank', '2026-05-14T20:00:00+02:00', {
-    description: '空白看板，用于临时拖拽组件。',
+  createDashboard('dash-empty-draft', '临时分析仪表盘草稿', 'personal', 'private', 'blank', '2026-05-14T20:00:00+02:00', {
+    description: '空白仪表盘，用于临时拖拽组件。',
     tags: ['草稿'],
+  }),
+  createDashboard('dash-web-weekly-doc', '运营周报网页仪表盘', 'personal', 'private', 'blank', '2026-05-13T16:00:00+02:00', {
+    type: 'web',
+    description: '嵌入外部网页或云文档，用于集中查看运营周报。',
+    tags: ['网页仪表盘', '云文档'],
+    widgets: [],
+    webConfig: {
+      url: 'https://example.com',
+      urlType: 'external_web',
+      carryToken: false,
+      iframeSandbox: ['allow-scripts', 'allow-same-origin', 'allow-forms'],
+      allowInteraction: true,
+      allowEditEmbeddedContent: false,
+    },
   }),
 ]
 
@@ -442,10 +460,10 @@ export const mockRecentVisitItems: AnalysisCenterAssetItem[] = [
   {
     id: 'recent-dashboard-ad',
     assetId: 'dash-ad-operation',
-    assetName: '广告运营监控看板',
+    assetName: '广告运营监控仪表盘',
     assetType: 'dashboard',
-    moduleName: '数据看板',
-    description: '最近查看的运营监控看板。',
+    moduleName: '仪表盘',
+    description: '最近查看的运营监控仪表盘。',
     ownerName: 'Chaoyang Xu',
     tags: ['运营监控'],
     visitedAt: '2026-05-18T15:50:00+02:00',
@@ -455,8 +473,8 @@ export const mockRecentVisitItems: AnalysisCenterAssetItem[] = [
     assetId: 'dash-experiment-review',
     assetName: '低金币激励实验复盘',
     assetType: 'dashboard',
-    moduleName: '数据看板',
-    description: '团队实验复盘看板。',
+    moduleName: '仪表盘',
+    description: '团队实验复盘仪表盘。',
     ownerName: 'Mia Chen',
     tags: ['实验复盘'],
     visitedAt: '2026-05-17T20:10:00+02:00',
@@ -481,10 +499,10 @@ export const mockRecycleBinItems: AnalysisCenterAssetItem[] = [
   {
     id: 'recycle-dashboard-1',
     assetId: 'dash-quality-old',
-    assetName: '旧版数据质量监控看板',
+    assetName: '旧版数据质量监控仪表盘',
     assetType: 'dashboard',
-    moduleName: '数据看板',
-    description: '已删除的数据质量监控看板。',
+    moduleName: '仪表盘',
+    description: '已删除的数据质量监控仪表盘。',
     ownerName: 'Chaoyang Xu',
     tags: ['数据质量'],
     deletedAt: '2026-05-17T18:40:00+02:00',
@@ -497,13 +515,13 @@ export const mockRecycleBinItems: AnalysisCenterAssetItem[] = [
     assetId: 'dash-ad-operation-w-old',
     assetName: '旧版广告收益表格',
     assetType: 'dashboard_widget',
-    moduleName: '看板组件',
-    description: '从广告运营监控看板删除的表格组件。',
+    moduleName: '仪表盘组件',
+    description: '从广告运营监控仪表盘删除的表格组件。',
     ownerName: 'Chaoyang Xu',
     tags: ['广告'],
     deletedAt: '2026-05-16T12:15:00+02:00',
     expireAt: '2026-06-15T12:15:00+02:00',
-    originalLocation: '广告运营监控看板',
+    originalLocation: '广告运营监控仪表盘',
     deletedByName: 'Mia Chen',
   },
 ]

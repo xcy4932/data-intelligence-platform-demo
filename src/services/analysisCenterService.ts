@@ -8,11 +8,23 @@ import {
 import type {
   AnalysisCenterAssetItem,
   AnalysisCenterSpace,
+  DashboardComponent,
   DashboardAsset,
+  DashboardCopyPayload,
   DashboardCreatePayload,
   DashboardFilters,
+  DashboardFolder,
+  DashboardFolderCreatePayload,
   DashboardGlobalFilter,
+  DashboardEditLock,
   DashboardListResult,
+  DashboardPage,
+  DashboardSettings,
+  DashboardTemplate,
+  DashboardTemplateApplyPayload,
+  DashboardTemplateExportPayload,
+  DashboardTemplateImportPayload,
+  DashboardWebConfig,
   DashboardWidgetAsset,
   SavedAnalysisAsset,
   SavedAnalysisFilters,
@@ -31,6 +43,51 @@ let dashboardAssets = [...mockDashboardAssets]
 let recentVisitItems = [...mockRecentVisitItems]
 let recycleBinItems = [...mockRecycleBinItems]
 let spaces = [...mockAnalysisCenterSpaces]
+let defaultDashboardId = 'dash-ad-operation'
+let deletedDashboardMap: Record<string, DashboardAsset> = {}
+let dashboardEditLocks: Record<string, DashboardEditLock> = {}
+let dashboardFolders: DashboardFolder[] = [
+  {
+    id: 'folder-personal-growth',
+    name: '个人增长复盘',
+    groupType: 'personal',
+    canWrite: true,
+    createdAt: '2026-05-12T10:00:00+02:00',
+  },
+  {
+    id: 'folder-public-operation',
+    name: '公共经营仪表盘',
+    groupType: 'public',
+    canWrite: true,
+    createdAt: '2026-05-10T10:00:00+02:00',
+  },
+]
+let dashboardTemplates: DashboardTemplate[] = [
+  {
+    id: 'tpl-official-operation',
+    projectId: 'project-dataops-demo',
+    name: '运营监控标准模板',
+    description: '内置指标卡、趋势图、分布图和明细表，适合日常经营监控。',
+    scope: 'official',
+    resourcePackageUrl: '/template-packages/operation-monitoring.dashboard-template.zip',
+    layoutTemplate: 'operation_monitoring',
+    requiresDatasetMapping: true,
+    createdBy: '系统模板',
+    createdAt: '2026-05-01T09:00:00+02:00',
+  },
+  {
+    id: 'tpl-project-retention',
+    projectId: 'project-dataops-demo',
+    name: '新用户留存复盘模板',
+    description: '面向新用户留存和激励实验复盘，包含留存趋势、分群和结论区。',
+    scope: 'project',
+    resourcePackageUrl: '/template-packages/user-retention.dashboard-template.zip',
+    layoutTemplate: 'retention_analysis',
+    requiresDatasetMapping: true,
+    createdBy: 'Mia Chen',
+    createdAt: '2026-05-12T11:00:00+02:00',
+  },
+]
 const shareMembers: SharePrincipal[] = [
   { id: 'u_chaoyang', name: 'Chaoyang Xu', description: '数据产品负责人' },
   { id: 'u_mia', name: 'Mia Chen', description: '运营分析师' },
@@ -57,6 +114,255 @@ const resolveMock = <T>(payload: T): Promise<T> =>
   new Promise((resolve) => {
     setTimeout(() => resolve(payload), MOCK_DELAY)
   })
+
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
+const currentEditorUser = {
+  userId: 'u_chaoyang',
+  userName: 'Chaoyang Xu',
+}
+
+const buildEditLock = (dashboardId: string): DashboardEditLock => {
+  const now = new Date()
+  const expireAt = new Date(now.getTime() + 90_000).toISOString()
+
+  return {
+    dashboardId,
+    userId: currentEditorUser.userId,
+    userName: currentEditorUser.userName,
+    lockedAt: now.toISOString(),
+    heartbeatAt: now.toISOString(),
+    expireAt,
+    lockExpireAt: expireAt,
+  }
+}
+
+const getDefaultSettings = (): DashboardSettings => ({
+  themeId: 'light',
+  layoutMode: 'tile',
+  canvasBackground: {
+    color: '#f7f9fc',
+    opacity: 100,
+  },
+  canvasSize: {
+    mode: 'adaptive',
+    width: 1440,
+    height: 900,
+  },
+  viewMode: {
+    anchorDefaultExpanded: true,
+    toolbarGlobalControlEnabled: true,
+    tooltipIconGlobalControlEnabled: true,
+    toolbarDefaultCollapsed: false,
+    visibleToolbarActions: ['refresh', 'fullscreen', 'bookmark', 'export', 'embed'],
+    visibleTooltipIcons: ['comment', 'quick_query', 'monitor', 'linkage'],
+    adaptiveWidthMode: 'scale_width_only',
+  },
+  autoRefresh: {
+    enabled: false,
+    intervalSeconds: 300,
+  },
+  commentAdvanced: {
+    enabled: true,
+  },
+  mobileLayout: {
+    enabled: false,
+  },
+  padding: {
+    top: 16,
+    right: 16,
+    bottom: 16,
+    left: 16,
+  },
+  appearance: {
+    fillColor: '#ffffff',
+    borderColor: '#e5e7eb',
+    borderWidth: 1,
+    borderRadius: 8,
+    autoAdaptComponentColor: true,
+  },
+})
+
+const inferWebUrlType = (url: string): DashboardWebConfig['urlType'] => {
+  if (url.includes('/analysis-center/dashboards/') || url.includes('/dashboard/')) {
+    return 'dashboard_embed'
+  }
+
+  if (/feishu|larksuite|docs\.qq|yuque|notion/i.test(url)) {
+    return 'cloud_doc'
+  }
+
+  return 'external_web'
+}
+
+const assertValidWebUrl = (url: string): void => {
+  try {
+    const nextUrl = new URL(url)
+
+    if (!['http:', 'https:'].includes(nextUrl.protocol)) {
+      throw new Error('invalid protocol')
+    }
+  } catch {
+    throw new Error('请输入合法的网页地址')
+  }
+}
+
+const buildWebConfig = (url: string, previousConfig?: DashboardWebConfig): DashboardWebConfig => {
+  const urlType = inferWebUrlType(url)
+
+  return {
+    url,
+    urlType,
+    carryToken: urlType === 'dashboard_embed',
+    iframeSandbox: previousConfig?.iframeSandbox ?? ['allow-scripts', 'allow-same-origin', 'allow-forms'],
+    originalDashboardId: url.match(/dash-[a-z0-9-]+/i)?.[0],
+    allowInteraction: previousConfig?.allowInteraction ?? true,
+    allowEditEmbeddedContent: false,
+  }
+}
+
+const getFolderSpace = (folderId?: string): AnalysisCenterSpace | undefined => {
+  const folder = dashboardFolders.find((item) => item.id === folderId)
+
+  if (!folder) {
+    return undefined
+  }
+
+  return folder.groupType === 'public' ? findSpace('space-public') : findSpace('space-personal')
+}
+
+const assertDashboardNameAvailable = (name: string, folderId?: string, ignoredId?: string): void => {
+  const hasDuplicate = dashboardAssets.some(
+    (dashboard) =>
+      dashboard.id !== ignoredId &&
+      dashboard.status !== 'deleted' &&
+      (dashboard.folderId ?? '') === (folderId ?? '') &&
+      dashboard.name === name,
+  )
+
+  if (hasDuplicate) {
+    throw new Error('同目录下已存在同名仪表盘')
+  }
+}
+
+const widgetToComponent = (
+  dashboardId: string,
+  pageId: string,
+  widget: DashboardWidgetAsset,
+  index: number,
+): DashboardComponent => ({
+  id: `${widget.id}_component`,
+  dashboardId,
+  pageId,
+  type: widget.widgetType === 'table' ? 'stitched_table' : 'chart',
+  name: widget.title,
+  order: index,
+  zIndex: index + 1,
+  layout: {
+    x: index % 2,
+    y: Math.floor(index / 2),
+    width: widget.widgetType === 'table' || widget.widgetType === 'line' ? 2 : 1,
+    height: widget.widgetType === 'metric_card' ? 1 : 2,
+    floating: false,
+    minWidth: 1,
+    minHeight: 1,
+  },
+  visible: true,
+  props: {
+    description: widget.description ?? '',
+    chartType: widget.widgetType,
+    datasetId: index % 2 === 0 ? 'ds_ad_watch_detail' : 'ds_user_retention',
+    drillPath: ['大区', '省份', '城市'],
+    linkageTargets: [],
+    jumpTemplate: 'https://www.baidu.com/s?wd={省份}',
+    monitorable: widget.widgetType === 'line' || widget.widgetType === 'bar' || widget.widgetType === 'table',
+  },
+  widget,
+  createdAt: widget.lastRefreshAt ?? new Date().toISOString(),
+  updatedAt: widget.lastRefreshAt ?? new Date().toISOString(),
+})
+
+const ensureDashboardRuntime = (dashboard: DashboardAsset): DashboardAsset => {
+  const now = new Date().toISOString()
+  dashboard.projectId = dashboard.projectId ?? 'project-dataops-demo'
+  dashboard.type = dashboard.type ?? 'normal'
+  dashboard.groupType = dashboard.groupType ?? (dashboard.spaceType === 'public' ? 'public' : dashboard.ownerId === 'u_chaoyang' ? 'personal' : 'shared')
+  dashboard.folderId = dashboard.folderId ?? (dashboard.groupType === 'public' ? 'folder-public-operation' : 'folder-personal-growth')
+  dashboard.publishMode = dashboard.publishMode ?? (dashboard.id === 'dash-experiment-review' ? 'versioned' : 'realtime')
+  dashboard.isDefaultForCurrentUser = dashboard.id === defaultDashboardId
+  dashboard.settings = dashboard.settings ?? getDefaultSettings()
+  dashboard.bookmarks = dashboard.bookmarks ?? [
+    {
+      id: `${dashboard.id}_bookmark_default`,
+      name: '低金币用户筛选',
+      scope: 'private',
+      filterState: { time_range: 'last_14_days', user_segment: 'low_coin' },
+      activePageId: `${dashboard.id}_page_main`,
+      createdBy: 'Chaoyang Xu',
+      createdAt: now,
+    },
+  ]
+  dashboard.comments = dashboard.comments ?? []
+  dashboard.subscriptions = dashboard.subscriptions ?? []
+  dashboard.monitors = dashboard.monitors ?? []
+  dashboard.versions = dashboard.versions ?? []
+  dashboard.announcementConfig = dashboard.announcementConfig ?? {
+    enabled: dashboard.id === 'dash-ad-operation',
+    content: '广告观看次数连续下滑，运营团队已进入定位阶段。',
+  }
+  dashboard.multiLangConfig = dashboard.multiLangConfig ?? {
+    enabled: false,
+    locale: 'zh-CN',
+    names: {
+      'zh-CN': dashboard.name,
+      'en-US': dashboard.name,
+    },
+  }
+
+  if (!dashboard.pages?.length) {
+    const pageId = `${dashboard.id}_page_main`
+    dashboard.pages = [
+      {
+        id: pageId,
+        dashboardId: dashboard.id,
+        name: '总览',
+        order: 0,
+        visibleInViewMode: true,
+        layoutMode: 'inherit',
+        components: dashboard.widgets.map((widget, index) => widgetToComponent(dashboard.id, pageId, widget, index)),
+        createdAt: dashboard.createdAt,
+        updatedAt: dashboard.updatedAt,
+      },
+      {
+        id: `${dashboard.id}_page_detail`,
+        dashboardId: dashboard.id,
+        name: '明细',
+        order: 1,
+        visibleInViewMode: true,
+        layoutMode: 'inherit',
+        components: [],
+        createdAt: dashboard.createdAt,
+        updatedAt: dashboard.updatedAt,
+      },
+    ]
+  }
+
+  if (!dashboard.publishedPages?.length) {
+    dashboard.publishedPages = clone(dashboard.pages)
+  }
+
+  return dashboard
+}
+
+dashboardAssets = dashboardAssets.map((dashboard, index) => {
+  const enriched = ensureDashboardRuntime(dashboard)
+  if (index === 1) {
+    enriched.groupType = 'shared'
+    enriched.spaceType = 'team'
+    enriched.visibility = 'team'
+  }
+  return enriched
+})
 
 const getStats = (items: SavedAnalysisAsset[]): SavedAnalysisStats => ({
   total: items.length,
@@ -294,6 +600,10 @@ const sortDashboards = (items: DashboardAsset[], sortMode: DashboardFilters['sor
 
 export const getDashboardList = (filters: DashboardFilters): Promise<DashboardListResult> => {
   const keyword = filters.keyword.trim().toLowerCase()
+  dashboardAssets = dashboardAssets.map(ensureDashboardRuntime)
+  if (defaultDashboardId && !dashboardAssets.some((item) => item.id === defaultDashboardId && item.status !== 'deleted' && item.status !== 'no_permission')) {
+    defaultDashboardId = ''
+  }
   const filteredItems = dashboardAssets.filter((item) => {
     const matchesKeyword =
       !keyword ||
@@ -301,6 +611,7 @@ export const getDashboardList = (filters: DashboardFilters): Promise<DashboardLi
       item.description?.toLowerCase().includes(keyword) ||
       item.ownerName.toLowerCase().includes(keyword) ||
       item.tags.some((tag) => tag.toLowerCase().includes(keyword))
+    const matchesFavorite = !filters.favoriteOnly || item.favorite || item.isDefaultForCurrentUser
     const matchesSpace = filters.spaceType === 'all' || item.spaceType === filters.spaceType
     const matchesVisibility = filters.visibility === 'all' || item.visibility === filters.visibility
     const matchesOwner =
@@ -311,26 +622,61 @@ export const getDashboardList = (filters: DashboardFilters): Promise<DashboardLi
     const matchesUpdatedAt = isDashboardWithinUpdatedRange(item.updatedAt, filters.updatedAt)
     const matchesStatus = filters.status === 'all' || item.status === filters.status
 
-    return matchesKeyword && matchesSpace && matchesVisibility && matchesOwner && matchesTags && matchesUpdatedAt && matchesStatus
+    return (
+      item.status !== 'deleted' &&
+      matchesKeyword &&
+      matchesFavorite &&
+      matchesSpace &&
+      matchesVisibility &&
+      matchesOwner &&
+      matchesTags &&
+      matchesUpdatedAt &&
+      matchesStatus
+    )
   })
   const tags = Array.from(new Set(dashboardAssets.flatMap((item) => item.tags)))
 
   return resolveMock({
     items: sortDashboards(filteredItems, filters.sortMode),
     tags,
+    folders: dashboardFolders,
+    defaultDashboardId,
   })
 }
 
 export const createDashboard = async (payload: DashboardCreatePayload): Promise<DashboardAsset> => {
   const now = new Date().toISOString()
-  const space = findSpace(payload.spaceId) ?? findSpace('space-personal')
-  const widgets: DashboardWidgetAsset[] = payload.layoutTemplate === 'blank'
+  const name = payload.name.trim()
+  const folderSpace = getFolderSpace(payload.folderId)
+  const space = folderSpace ?? findSpace(payload.spaceId) ?? findSpace('space-personal')
+  const isWebDashboard = payload.type === 'web'
+  const webUrl = payload.webUrl?.trim() ?? ''
+
+  if (!name) {
+    throw new Error('仪表盘名称不能为空')
+  }
+
+  if (name.length > 50) {
+    throw new Error('仪表盘名称不能超过 50 个字符')
+  }
+
+  if (payload.folderId && !dashboardFolders.some((folder) => folder.id === payload.folderId && folder.canWrite)) {
+    throw new Error('目标路径不可写')
+  }
+
+  assertDashboardNameAvailable(name, payload.folderId)
+
+  if (isWebDashboard) {
+    assertValidWebUrl(webUrl)
+  }
+
+  const widgets: DashboardWidgetAsset[] = payload.layoutTemplate === 'blank' || isWebDashboard
     ? []
     : [
         {
           id: `dash_${Date.now()}_w1`,
           title: '广告观看次数趋势',
-          description: '新建看板模板组件。',
+          description: '新建仪表盘模板组件。',
           widgetType: 'line',
           chartType: 'line',
           sourceAnalysisId: 'analysis-ad-watch-drop',
@@ -349,16 +695,26 @@ export const createDashboard = async (payload: DashboardCreatePayload): Promise<
       ]
   const dashboard: DashboardAsset = {
     id: `dash_${Date.now()}`,
-    name: payload.name,
+    projectId: 'project-dataops-demo',
+    type: payload.type ?? 'normal',
+    name,
     description: payload.description,
-    spaceType: payload.spaceType,
+    folderId: payload.folderId,
+    spaceType: space?.type ?? payload.spaceType,
     spaceId: space?.id ?? 'space-personal',
     spaceName: space?.name ?? '个人空间',
-    visibility: payload.visibility,
+    groupType: space?.type === 'public' ? 'public' : 'personal',
+    visibility: space?.type === 'public' ? 'public' : payload.visibility,
     ownerId: 'u_chaoyang',
     ownerName: 'Chaoyang Xu',
     tags: payload.tags,
-    status: 'normal',
+    status: 'published',
+    publishMode: 'realtime',
+    isDefaultForCurrentUser: false,
+    webConfig: isWebDashboard
+      ? buildWebConfig(webUrl)
+      : undefined,
+    settings: getDefaultSettings(),
     widgetCount: widgets.length,
     errorWidgetCount: 0,
     lastRefreshedAt: now,
@@ -381,32 +737,121 @@ export const createDashboard = async (payload: DashboardCreatePayload): Promise<
     layoutTemplate: payload.layoutTemplate,
     favorite: false,
   }
+  ensureDashboardRuntime(dashboard)
+  dashboard.publishedPages = clone(dashboard.pages ?? [])
   dashboardAssets = [dashboard, ...dashboardAssets]
 
   return resolveMock(dashboard)
 }
 
-export const duplicateDashboard = async (id: string): Promise<DashboardAsset> => {
+export const createWebDashboard = async (payload: DashboardCreatePayload): Promise<DashboardAsset> => {
+  const url = payload.webUrl?.trim() ?? ''
+
+  assertValidWebUrl(url)
+
+  return createDashboard({
+    ...payload,
+    type: 'web',
+    webUrl: url,
+    layoutTemplate: 'blank',
+  })
+}
+
+export const createDashboardFolder = async (
+  payload: DashboardFolderCreatePayload,
+): Promise<DashboardFolder> => {
+  const name = payload.name.trim()
+
+  if (!name) {
+    throw new Error('文件夹名称不能为空')
+  }
+
+  const duplicate = dashboardFolders.some(
+    (folder) => folder.name === name && folder.groupType === payload.groupType && folder.parentId === payload.parentId,
+  )
+
+  if (duplicate) {
+    throw new Error('同级目录下已存在同名文件夹')
+  }
+
+  const folder: DashboardFolder = {
+    id: `folder_${Date.now()}`,
+    name,
+    parentId: payload.parentId,
+    groupType: payload.groupType,
+    canWrite: true,
+    createdAt: new Date().toISOString(),
+  }
+  dashboardFolders = [folder, ...dashboardFolders]
+
+  return resolveMock(folder)
+}
+
+export const duplicateDashboard = async (
+  id: string,
+  payload?: DashboardCopyPayload,
+): Promise<DashboardAsset> => {
   const source = dashboardAssets.find((item) => item.id === id)
 
   if (!source) {
-    throw new Error('看板不存在')
+    throw new Error('仪表盘不存在')
   }
 
+  ensureDashboardRuntime(source)
+  const targetName = payload?.name.trim() || `${source.name} 副本`
+  const targetFolderId = payload?.targetFolderId ?? source.folderId
+  const targetSpace = getFolderSpace(targetFolderId) ?? (payload?.targetSpaceId ? findSpace(payload.targetSpaceId) : findSpace('space-personal'))
+  const now = new Date().toISOString()
+  assertDashboardNameAvailable(targetName, targetFolderId)
+  const pages = clone(source.pages ?? []).map((page, pageIndex) => ({
+    ...page,
+    id: `${page.id}_copy_${Date.now()}_${pageIndex}`,
+    dashboardId: `${source.id}_copy_${Date.now()}`,
+    components: page.components.map((component, componentIndex) => ({
+      ...component,
+      id: `${component.id}_copy_${Date.now()}_${componentIndex}`,
+      dashboardId: `${source.id}_copy_${Date.now()}`,
+      widget: component.widget
+        ? {
+            ...component.widget,
+            id: payload?.copyChartResources
+              ? `${component.widget.id}_chart_copy_${Date.now()}_${componentIndex}`
+              : component.widget.id,
+            title: payload?.copyChartResources ? `${component.widget.title} 副本` : component.widget.title,
+          }
+        : component.widget,
+      updatedAt: now,
+    })),
+    updatedAt: now,
+  }))
+  const duplicatedId = `${source.id}_copy_${Date.now()}`
   const duplicated: DashboardAsset = {
     ...source,
-    id: `${source.id}_copy_${Date.now()}`,
-    name: `${source.name} 副本`,
+    id: duplicatedId,
+    name: targetName,
+    folderId: targetFolderId,
     ownerId: 'u_chaoyang',
     ownerName: 'Chaoyang Xu',
     visibility: 'private',
-    spaceType: 'personal',
-    spaceId: 'space-personal',
-    spaceName: '个人空间',
+    spaceType: targetSpace?.type ?? 'personal',
+    spaceId: targetSpace?.id ?? 'space-personal',
+    spaceName: targetSpace?.name ?? '个人空间',
+    groupType: targetSpace?.type === 'public' ? 'public' : 'personal',
+    pages: pages.map((page) => ({
+      ...page,
+      dashboardId: duplicatedId,
+      components: page.components.map((component) => ({
+        ...component,
+        dashboardId: duplicatedId,
+        pageId: page.id,
+      })),
+    })),
     favorite: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    isDefaultForCurrentUser: false,
+    createdAt: now,
+    updatedAt: now,
   }
+  duplicated.publishedPages = clone(duplicated.pages ?? [])
   dashboardAssets = [duplicated, ...dashboardAssets]
 
   return resolveMock(duplicated)
@@ -417,14 +862,22 @@ export const deleteDashboard = async (id: string): Promise<{ success: boolean, m
   dashboardAssets = dashboardAssets.filter((item) => item.id !== id)
 
   if (target) {
+    target.status = 'deleted'
+    if (defaultDashboardId === id) {
+      defaultDashboardId = ''
+    }
+    deletedDashboardMap = {
+      ...deletedDashboardMap,
+      [id]: target,
+    }
     recycleBinItems = [
       {
         id: `recycle_${target.id}_${Date.now()}`,
         assetId: target.id,
         assetName: target.name,
         assetType: 'dashboard',
-        moduleName: '数据看板',
-        description: target.description ?? '已删除的数据看板。',
+        moduleName: '仪表盘',
+        description: target.description ?? '已删除的仪表盘。',
         ownerName: target.ownerName,
         tags: target.tags,
         deletedAt: new Date().toISOString(),
@@ -438,18 +891,27 @@ export const deleteDashboard = async (id: string): Promise<{ success: boolean, m
 
   return resolveMock({
     success: true,
-    message: target ? `已删除「${target.name}」` : '已删除看板',
+    message: target ? `已删除「${target.name}」` : '已删除仪表盘',
   })
 }
 
 export const renameDashboard = async (id: string, name: string): Promise<DashboardAsset> => {
   const target = dashboardAssets.find((item) => item.id === id)
+  const nextName = name.trim()
 
   if (!target) {
-    throw new Error('看板不存在')
+    throw new Error('仪表盘不存在')
   }
 
-  target.name = name
+  if (!nextName) {
+    throw new Error('仪表盘名称不能为空')
+  }
+
+  assertDashboardNameAvailable(nextName, target.folderId, target.id)
+  target.name = nextName
+  if (target.multiLangConfig) {
+    target.multiLangConfig.names['zh-CN'] = nextName
+  }
   target.updatedAt = new Date().toISOString()
 
   return resolveMock(target)
@@ -463,7 +925,7 @@ export const moveDashboardToSpace = async (
   const space = findSpace(spaceId)
 
   if (!target || !space) {
-    throw new Error('看板或空间不存在')
+    throw new Error('仪表盘或空间不存在')
   }
 
   target.spaceId = space.id
@@ -476,27 +938,244 @@ export const moveDashboardToSpace = async (
   return resolveMock(target)
 }
 
+export const moveDashboardToFolder = async (
+  id: string,
+  folderId: string,
+): Promise<DashboardAsset> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+  const folder = dashboardFolders.find((item) => item.id === folderId)
+  const space = getFolderSpace(folderId)
+
+  if (!target || !folder || !space) {
+    throw new Error('仪表盘或目标文件夹不存在')
+  }
+
+  if (!folder.canWrite) {
+    throw new Error('目标路径不可写')
+  }
+
+  assertDashboardNameAvailable(target.name, folderId, target.id)
+  target.folderId = folderId
+  target.spaceId = space.id
+  target.spaceName = space.name
+  target.spaceType = space.type
+  target.groupType = folder.groupType
+  target.visibility = space.type === 'public' ? 'public' : target.visibility === 'public' ? 'team' : target.visibility
+  target.updatedAt = new Date().toISOString()
+  refreshSpaceAssetCounts()
+
+  return resolveMock(target)
+}
+
+export const updateWebDashboard = async (
+  id: string,
+  payload: { url: string, folderId?: string, tags?: string[] },
+): Promise<DashboardAsset> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+  const url = payload.url.trim()
+
+  if (!target || target.type !== 'web') {
+    throw new Error('网页仪表盘不存在')
+  }
+
+  assertValidWebUrl(url)
+  if (payload.folderId && payload.folderId !== target.folderId) {
+    await moveDashboardToFolder(id, payload.folderId)
+  }
+  target.webConfig = buildWebConfig(url, target.webConfig)
+  target.tags = payload.tags ?? target.tags
+  target.updatedAt = new Date().toISOString()
+
+  return resolveMock(target)
+}
+
 export const getDashboard = (id: string): Promise<DashboardAsset> => {
   const target = dashboardAssets.find((item) => item.id === id)
 
   if (!target) {
-    throw new Error('看板不存在')
+    const deletedTarget = deletedDashboardMap[id]
+
+    if (deletedTarget) {
+      return resolveMock(ensureDashboardRuntime(deletedTarget))
+    }
+
+    throw new Error('仪表盘不存在')
   }
 
+  ensureDashboardRuntime(target)
   recentVisitItems = [
     {
       id: `recent_${target.id}_${Date.now()}`,
       assetId: target.id,
       assetName: target.name,
       assetType: 'dashboard',
-      moduleName: '数据看板',
-      description: target.description ?? '数据看板',
+      moduleName: '仪表盘',
+      description: target.description ?? '仪表盘',
       ownerName: target.ownerName,
       tags: target.tags,
       visitedAt: new Date().toISOString(),
     },
     ...recentVisitItems.filter((item) => item.assetId !== target.id),
   ]
+
+  return resolveMock(target)
+}
+
+export const acquireDashboardEditLock = async (id: string, force = false): Promise<DashboardEditLock> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+
+  if (!target) {
+    throw new Error('仪表盘不存在')
+  }
+
+  const existingLock = dashboardEditLocks[id]
+  const now = Date.now()
+
+  if (
+    existingLock &&
+    existingLock.userId !== currentEditorUser.userId &&
+    new Date(existingLock.expireAt || existingLock.lockExpireAt).getTime() > now &&
+    !force
+  ) {
+    target.editingLock = existingLock
+    throw new Error(`${existingLock.userName} 正在编辑该仪表盘`)
+  }
+
+  const lock = buildEditLock(id)
+  dashboardEditLocks[id] = lock
+  target.editingLock = lock
+
+  return resolveMock(lock)
+}
+
+export const heartbeatDashboardEditLock = async (id: string): Promise<DashboardEditLock> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+  const existingLock = dashboardEditLocks[id]
+
+  if (!target || !existingLock || existingLock.userId !== currentEditorUser.userId) {
+    throw new Error('编辑锁不存在或已失效')
+  }
+
+  const heartbeatAt = new Date()
+  const expireAt = new Date(heartbeatAt.getTime() + 90_000).toISOString()
+  const lock: DashboardEditLock = {
+    ...existingLock,
+    heartbeatAt: heartbeatAt.toISOString(),
+    expireAt,
+    lockExpireAt: expireAt,
+  }
+  dashboardEditLocks[id] = lock
+  target.editingLock = lock
+
+  return resolveMock(lock)
+}
+
+export const releaseDashboardEditLock = async (id: string): Promise<{ success: boolean }> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+  const existingLock = dashboardEditLocks[id]
+
+  if (existingLock?.userId === currentEditorUser.userId) {
+    delete dashboardEditLocks[id]
+  }
+
+  if (target?.editingLock?.userId === currentEditorUser.userId) {
+    delete target.editingLock
+  }
+
+  return resolveMock({ success: true })
+}
+
+export const forceReleaseDashboardEditLock = async (id: string): Promise<{ success: boolean, auditLog: string }> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+  const previousLock = dashboardEditLocks[id] ?? target?.editingLock
+
+  delete dashboardEditLocks[id]
+  if (target) {
+    delete target.editingLock
+  }
+
+  return resolveMock({
+    success: true,
+    auditLog: `项目管理员 ${currentEditorUser.userName} 已强制释放 ${previousLock?.userName ?? '未知用户'} 的编辑锁。`,
+  })
+}
+
+export const updateDashboardState = async (
+  id: string,
+  patch: Partial<DashboardAsset>,
+): Promise<DashboardAsset> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+
+  if (!target) {
+    throw new Error('仪表盘不存在')
+  }
+
+  Object.assign(target, patch, { updatedAt: new Date().toISOString() })
+  target.widgetCount = target.pages?.reduce((count, page) => count + page.components.length, 0) ?? target.widgetCount
+  target.errorWidgetCount = target.widgets.filter((widget) => widget.status === 'error' || widget.status === 'invalid').length
+  ensureDashboardRuntime(target)
+
+  return resolveMock(target)
+}
+
+export const setDefaultDashboard = async (id: string): Promise<DashboardAsset> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+
+  if (!target) {
+    throw new Error('仪表盘不存在')
+  }
+
+  defaultDashboardId = id
+  dashboardAssets.forEach((dashboard) => {
+    dashboard.isDefaultForCurrentUser = dashboard.id === id
+  })
+
+  return resolveMock(target)
+}
+
+export const clearDefaultDashboard = async (): Promise<{ success: boolean }> => {
+  defaultDashboardId = ''
+  dashboardAssets.forEach((dashboard) => {
+    dashboard.isDefaultForCurrentUser = false
+  })
+
+  return resolveMock({ success: true })
+}
+
+export const publishDashboard = async (
+  id: string,
+  description: string,
+  deleteVersionId?: string,
+): Promise<DashboardAsset> => {
+  const target = dashboardAssets.find((item) => item.id === id)
+
+  if (!target) {
+    throw new Error('仪表盘不存在')
+  }
+
+  ensureDashboardRuntime(target)
+  const versions = deleteVersionId
+    ? (target.versions ?? []).filter((item) => item.id !== deleteVersionId)
+    : target.versions ?? []
+  const maxVersion = versions.reduce((versionNo, version) => Math.max(versionNo, version.versionNo), 0)
+  const version = {
+    id: `version_${id}_${Date.now()}`,
+    dashboardId: id,
+    versionNo: maxVersion + 1,
+    description: description.trim() || '无描述',
+    snapshot: clone(target.pages ?? []),
+    status: 'published' as const,
+    createdBy: 'Chaoyang Xu',
+    createdAt: new Date().toISOString(),
+  }
+  target.versions = [
+    version,
+    ...versions.map((item) => ({ ...item, status: 'history' as const })).slice(0, 2),
+  ]
+  target.publishedPages = clone(target.pages ?? [])
+  target.currentPublishedVersionId = version.id
+  target.status = 'published'
+  target.updatedAt = version.createdAt
 
   return resolveMock(target)
 }
@@ -508,7 +1187,7 @@ export const refreshDashboard = async (
   const target = dashboardAssets.find((item) => item.id === id)
 
   if (!target) {
-    throw new Error('看板不存在')
+    throw new Error('仪表盘不存在')
   }
 
   const now = new Date().toISOString()
@@ -548,7 +1227,7 @@ export const deleteWidget = async (dashboardId: string, widgetId: string): Promi
   const widget = dashboard?.widgets.find((item) => item.id === widgetId)
 
   if (!dashboard) {
-    throw new Error('看板不存在')
+    throw new Error('仪表盘不存在')
   }
 
   dashboard.widgets = dashboard.widgets.filter((item) => item.id !== widgetId)
@@ -563,8 +1242,8 @@ export const deleteWidget = async (dashboardId: string, widgetId: string): Promi
         assetId: widget.id,
         assetName: widget.title,
         assetType: 'dashboard_widget',
-        moduleName: '看板组件',
-        description: widget.description ?? '已删除的看板组件。',
+        moduleName: '仪表盘组件',
+        description: widget.description ?? '已删除的仪表盘组件。',
         ownerName: dashboard.ownerName,
         tags: dashboard.tags,
         deletedAt: new Date().toISOString(),
@@ -601,7 +1280,7 @@ export const toggleDashboardFavorite = async (id: string): Promise<DashboardAsse
   const dashboard = dashboardAssets.find((item) => item.id === id)
 
   if (!dashboard) {
-    throw new Error('看板不存在')
+    throw new Error('仪表盘不存在')
   }
 
   dashboard.favorite = !dashboard.favorite
@@ -645,8 +1324,8 @@ export const getFavorites = (): Promise<AnalysisCenterAssetItem[]> => {
       assetId: item.id,
       assetName: item.name,
       assetType: 'dashboard',
-      moduleName: '数据看板',
-      description: item.description ?? '数据看板',
+      moduleName: '仪表盘',
+      description: item.description ?? '仪表盘',
       ownerName: item.ownerName,
       tags: item.tags,
       favoritedAt: item.updatedAt,
@@ -805,6 +1484,131 @@ export const getAssetShareGrants = (
   })
 }
 
+export const createDashboardTag = async (name: string): Promise<string[]> => {
+  const nextName = name.trim()
+
+  if (!nextName) {
+    throw new Error('标签名不能为空')
+  }
+
+  const tags = Array.from(new Set(dashboardAssets.flatMap((item) => item.tags)))
+
+  if (tags.includes(nextName)) {
+    throw new Error('同项目标签名不可重复')
+  }
+
+  return resolveMock([...tags, nextName])
+}
+
+export const deleteDashboardTag = async (name: string): Promise<string[]> => {
+  dashboardAssets = dashboardAssets.map((dashboard) => ({
+    ...dashboard,
+    tags: dashboard.tags.filter((tag) => tag !== name),
+  }))
+
+  return resolveMock(Array.from(new Set(dashboardAssets.flatMap((item) => item.tags))))
+}
+
+export const getDashboardTemplates = (): Promise<DashboardTemplate[]> =>
+  resolveMock(clone(dashboardTemplates))
+
+export const importDashboardTemplate = async (
+  payload: DashboardTemplateImportPayload,
+): Promise<DashboardTemplate> => {
+  const packageName = payload.packageName.trim()
+
+  if (!/\.(dashboard-template|zip)$/i.test(packageName)) {
+    throw new Error('文件格式必须是系统支持的模板包格式')
+  }
+
+  if (/missing|缺失/i.test(packageName)) {
+    throw new Error('模板包中的图表、图片或主题资源缺失')
+  }
+
+  if (!dashboardFolders.some((folder) => folder.id === payload.targetFolderId && folder.canWrite)) {
+    throw new Error('目标目录不可写')
+  }
+
+  const now = new Date().toISOString()
+  const template: DashboardTemplate = {
+    id: `tpl_import_${Date.now()}`,
+    projectId: 'project-dataops-demo',
+    name: packageName.replace(/\.(dashboard-template|zip)$/i, ''),
+    description: '从模板资源包导入，包含仪表盘结构描述、布局和主题。',
+    scope: 'project',
+    resourcePackageUrl: `/template-packages/${encodeURIComponent(packageName)}`,
+    layoutTemplate: 'operation_monitoring',
+    requiresDatasetMapping: true,
+    createdBy: 'Chaoyang Xu',
+    createdAt: now,
+  }
+  dashboardTemplates = [template, ...dashboardTemplates]
+
+  return resolveMock(template)
+}
+
+export const exportDashboardTemplate = async (
+  payload: DashboardTemplateExportPayload,
+): Promise<DashboardTemplate> => {
+  const source = dashboardAssets.find((item) => item.id === payload.dashboardId)
+  const name = payload.name.trim()
+
+  if (!source) {
+    throw new Error('仪表盘不存在')
+  }
+
+  if (!name) {
+    throw new Error('模板名称不能为空')
+  }
+
+  const now = new Date().toISOString()
+  const template: DashboardTemplate = {
+    id: `tpl_export_${Date.now()}`,
+    projectId: 'project-dataops-demo',
+    name,
+    description: payload.description || `${source.name} 导出的模板${payload.desensitizeSampleData ? '，示例数据已脱敏。' : '。'}`,
+    sourceDashboardId: source.id,
+    scope: 'project',
+    resourcePackageUrl: `/template-packages/${source.id}-${Date.now()}.dashboard-template.zip`,
+    layoutTemplate: source.layoutTemplate,
+    requiresDatasetMapping: true,
+    createdBy: 'Chaoyang Xu',
+    createdAt: now,
+  }
+
+  if (payload.saveToLibrary) {
+    dashboardTemplates = [template, ...dashboardTemplates]
+  }
+
+  return resolveMock(template)
+}
+
+export const applyDashboardTemplate = async (
+  payload: DashboardTemplateApplyPayload,
+): Promise<DashboardAsset> => {
+  const template = dashboardTemplates.find((item) => item.id === payload.templateId)
+
+  if (!template) {
+    throw new Error('模板不存在')
+  }
+
+  const folderSpace = getFolderSpace(payload.targetFolderId)
+  const dashboard = await createDashboard({
+    name: payload.name.trim() || `${template.name} 应用`,
+    description: template.description,
+    type: 'normal',
+    folderId: payload.targetFolderId,
+    spaceType: folderSpace?.type ?? 'personal',
+    spaceId: folderSpace?.id ?? 'space-personal',
+    visibility: folderSpace?.type === 'public' ? 'public' : 'private',
+    layoutTemplate: template.layoutTemplate ?? 'operation_monitoring',
+    tags: ['模板应用'],
+  })
+  dashboard.description = `${template.name} 应用生成；模板修改不会影响该仪表盘。`
+
+  return resolveMock(dashboard)
+}
+
 export const analysisCenterService = {
   getSavedAnalysisList,
   duplicateSavedAnalysis,
@@ -814,11 +1618,23 @@ export const analysisCenterService = {
   moveSavedAnalysisToSpace,
   getDashboardList,
   createDashboard,
+  createWebDashboard,
+  createDashboardFolder,
   getDashboard,
   duplicateDashboard,
   deleteDashboard,
   renameDashboard,
   moveDashboardToSpace,
+  moveDashboardToFolder,
+  updateWebDashboard,
+  updateDashboardState,
+  acquireDashboardEditLock,
+  heartbeatDashboardEditLock,
+  releaseDashboardEditLock,
+  forceReleaseDashboardEditLock,
+  setDefaultDashboard,
+  clearDefaultDashboard,
+  publishDashboard,
   refreshDashboard,
   refreshWidget,
   deleteWidget,
@@ -838,4 +1654,10 @@ export const analysisCenterService = {
   shareAsset,
   getShareOptions,
   getAssetShareGrants,
+  createDashboardTag,
+  deleteDashboardTag,
+  getDashboardTemplates,
+  importDashboardTemplate,
+  exportDashboardTemplate,
+  applyDashboardTemplate,
 }

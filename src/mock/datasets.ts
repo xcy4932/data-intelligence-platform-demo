@@ -262,6 +262,31 @@ export const mockDatasets: Dataset[] = [
     lastSyncAt: '2026-05-22 07:40:00',
   },
   {
+    id: 'ds_intent_prediction_result',
+    name: '客户意向度预测结果',
+    description: '可视化建模任务“客户意向度预测建模”的输出数据集，用于人群圈选、运营触达和看板分析。',
+    datasetType: 'normal',
+    sourceMode: 'extract',
+    folderId: 'folder_trade',
+    section: 'custom',
+    owner: 'Chaoyang Xu',
+    visibility: 'team',
+    permission: 'admin',
+    readonly: false,
+    status: 'sync_success',
+    storageEngine: 'clickhouse',
+    connectionId: 'conn_clickhouse_ad',
+    connectionName: '行为数仓 ClickHouse',
+    databaseName: 'ads_dm',
+    tableName: 'dm_intent_prediction_result_di',
+    rowCount: 9_824_300,
+    fieldCount: 3,
+    tags: ['可视化建模', '机器学习', '预测'],
+    createdAt: '2026-05-18 09:40:00',
+    updatedAt: '2026-05-24 02:34:18',
+    lastSyncAt: '2026-05-24 02:34:18',
+  },
+  {
     id: 'ds_low_coin_behavior_assoc',
     name: '低金币用户行为关联数据集',
     description: '低金币标签、广告观看明细和会员画像的关联结果，用于智能运营任务。',
@@ -974,6 +999,21 @@ enrichDataset('ds_payment_success', {
   runFrequency: 'hour',
   dataSizeBytes: 780_000_000,
   latestAccessTime: '2026-05-22 20:10:00',
+})
+
+enrichDataset('ds_intent_prediction_result', {
+  datasetCategory: 'personal',
+  sourceType: 'visual_model',
+  connectionMode: 'extract',
+  syncStatus: 'success',
+  sensitivityLevel: 'sensitive_masked',
+  alarmOwner: '智能运营组',
+  priority: 'high',
+  queueName: 'ops_modeling_ml',
+  runFrequency: 'day',
+  dataSizeBytes: 360_000_000,
+  latestAccessTime: '2026-05-24 09:20:00',
+  defaultVisualQueryUrl: '/analysis-center/dashboards',
 })
 
 enrichDataset('ds_low_coin_behavior_assoc', {

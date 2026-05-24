@@ -224,7 +224,7 @@ const maskPreviewSample = ref('uid_839201')
 
 const accessLogs = ref<AccessLog[]>([
   { id: 'access_1', user: 'Chaoyang Xu', action: '可视化查询', module: '事件分析', accessAt: '2026-05-22 10:10:00', rows: 18200 },
-  { id: 'access_2', user: 'Mia Chen', action: '保存到看板', module: '数据看板', accessAt: '2026-05-21 18:40:00', rows: 8600 },
+  { id: 'access_2', user: 'Mia Chen', action: '保存到看板', module: '仪表盘', accessAt: '2026-05-21 18:40:00', rows: 8600 },
   { id: 'access_3', user: '运营值班组', action: '订阅监控', module: '监控中心', accessAt: '2026-05-20 09:30:00', rows: 3200 },
 ])
 const operationLogs = ref<OperationLog[]>([
@@ -242,7 +242,7 @@ const impacts = ref<ImpactItem[]>([
     resourcePath: '/dashboard/ad-monitor',
     lastVisitedAt: '2026-05-22 10:30:00',
     fieldNames: ['ad_position', 'revenue', 'user_id'],
-    blockedReason: '删除字段会导致看板组件查询失败',
+    blockedReason: '删除字段会导致仪表盘组件查询失败',
   },
   {
     id: 'impact_2',
@@ -850,7 +850,7 @@ const maskScopeMemberTypeOptions: SelectOption[] = [
 const maskSceneOptions: SelectOption[] = [
   { label: '数据预览', value: 'preview' },
   { label: '可视化查询', value: 'visual_query' },
-  { label: '数据看板', value: 'dashboard' },
+  { label: '仪表盘', value: 'dashboard' },
   { label: '下载导出', value: 'download' },
   { label: '订阅', value: 'subscription' },
   { label: '监控', value: 'monitor' },
