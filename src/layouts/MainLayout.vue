@@ -66,7 +66,9 @@ const menuOptions: MenuOption[] = [
       { label: '数据可视化', key: '/analysis-center/visual-query' },
       { label: '保存分析', key: '/analysis-center/saved-analyses' },
       { label: '仪表盘', key: '/analysis-center/dashboards' },
+      { label: '数字大屏', key: '/analysis-center/big-screens' },
       { label: 'SQL 查询', key: '/analysis-center/sql-query' },
+      { label: '业务归因分析', key: '/analysis-center/business-attribution' },
       { label: '最近访问', key: '/analysis-center/recent' },
       { label: '收藏夹', key: '/analysis-center/favorites' },
       { label: '回收站', key: '/analysis-center/recycle-bin' },
@@ -171,6 +173,7 @@ const menuOptions: MenuOption[] = [
 ]
 
 const selectedKeys = computed(() => [route.path])
+const inlineReportMode = computed(() => route.path.includes('/business-attribution/reports/') && String(route.query.Inline ?? route.query.inline) === 'true')
 
 const breadcrumbItems = computed(() => {
   const matched = route.matched.filter((item) => item.meta?.title)
@@ -187,6 +190,7 @@ function handleMenuSelect(key: string) {
 <template>
   <n-layout has-sider class="main-layout">
     <n-layout-sider
+      v-if="!inlineReportMode"
       bordered
       collapse-mode="width"
       :collapsed-width="64"
@@ -215,7 +219,7 @@ function handleMenuSelect(key: string) {
     </n-layout-sider>
 
     <n-layout>
-      <n-layout-header bordered class="layout-header">
+      <n-layout-header v-if="!inlineReportMode" bordered class="layout-header">
         <div>
           <n-breadcrumb>
             <n-breadcrumb-item v-for="item in breadcrumbItems" :key="item">

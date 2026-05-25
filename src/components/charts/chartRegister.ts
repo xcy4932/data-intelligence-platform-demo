@@ -17,6 +17,7 @@ import {
   MarkLineComponent,
   MarkPointComponent,
   RadarComponent,
+  TitleComponent,
   TooltipComponent,
   VisualMapComponent,
 } from 'echarts/components'
@@ -41,6 +42,7 @@ use([
   RadarComponent,
   SankeyChart,
   ScatterChart,
+  TitleComponent,
   TooltipComponent,
   VisualMapComponent,
 ])

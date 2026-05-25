@@ -12,6 +12,18 @@ import DashboardView from '@/views/dashboard/DashboardView.vue'
 import AssetCollectionView from '@/views/analysis-center/AssetCollectionView.vue'
 import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue'
 import DashboardListView from '@/views/analysis-center/DashboardListView.vue'
+import BusinessAttributionConfigView from '@/views/analysis-center/BusinessAttributionConfigView.vue'
+import BusinessAttributionHomeView from '@/views/analysis-center/BusinessAttributionHomeView.vue'
+import BusinessAttributionReportView from '@/views/analysis-center/BusinessAttributionReportView.vue'
+import BusinessAttributionSubscriptionsView from '@/views/analysis-center/BusinessAttributionSubscriptionsView.vue'
+import BusinessAttributionWebhooksView from '@/views/analysis-center/BusinessAttributionWebhooksView.vue'
+import BigScreenEditorView from '@/views/analysis-center/BigScreenEditorView.vue'
+import BigScreenListView from '@/views/analysis-center/BigScreenListView.vue'
+import BigScreenPresentationHallView from '@/views/analysis-center/BigScreenPresentationHallView.vue'
+import BigScreenPresentationPlayerView from '@/views/analysis-center/BigScreenPresentationPlayerView.vue'
+import BigScreenPreviewView from '@/views/analysis-center/BigScreenPreviewView.vue'
+import BigScreenPublishedView from '@/views/analysis-center/BigScreenPublishedView.vue'
+import BigScreenResourceManagementView from '@/views/analysis-center/BigScreenResourceManagementView.vue'
 import SqlQueryWorkbenchPage from '@/views/analysis-center/SqlQueryWorkbenchPage.vue'
 import SqlVisualQueryPage from '@/views/analysis-center/SqlVisualQueryPage.vue'
 import VisualQueryPage from '@/views/analysis-center/VisualQueryPage.vue'
@@ -60,9 +72,73 @@ const router = createRouter({
           meta: { title: '仪表盘', module: '可视化分析' },
         },
         {
+          path: 'analysis-center/big-screens',
+          component: BigScreenListView,
+          meta: { title: '数字大屏', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/big-screens/resources',
+          component: BigScreenResourceManagementView,
+          meta: { title: '数字大屏资源管理', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/big-screens/presentation-hall',
+          component: BigScreenPresentationHallView,
+          meta: { title: '数字大屏演播厅', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/big-screens/:screenId/edit',
+          component: BigScreenEditorView,
+          meta: { title: '数字大屏编辑器', module: '可视化分析' },
+        },
+        {
           path: 'analysis-center/sql-query',
           component: SqlQueryWorkbenchPage,
           meta: { title: 'SQL 查询', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/business-attribution',
+          component: BusinessAttributionHomeView,
+          meta: { title: '业务归因分析', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/business-attribution/config/:configId/edit',
+          component: BusinessAttributionConfigView,
+          meta: { title: '业务归因配置', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/business-attribution/reports/:configId',
+          component: BusinessAttributionReportView,
+          meta: { title: '业务归因报告', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/business-attribution/subscriptions',
+          component: BusinessAttributionSubscriptionsView,
+          meta: { title: '归因订阅管理', module: '可视化分析' },
+        },
+        {
+          path: 'analysis-center/business-attribution/webhooks',
+          component: BusinessAttributionWebhooksView,
+          meta: { title: '归因 WebHook 配置', module: '可视化分析' },
+        },
+        {
+          path: 'insight/attribution',
+          redirect: '/analysis-center/business-attribution',
+        },
+        {
+          path: 'insight/attribution/config/:configId/edit',
+          component: BusinessAttributionConfigView,
+          meta: { title: '业务归因配置', module: '可视化分析' },
+        },
+        {
+          path: 'insight/attribution/report/:configId',
+          component: BusinessAttributionReportView,
+          meta: { title: '业务归因报告', module: '可视化分析' },
+        },
+        {
+          path: 'insight/attribution/subscriptions',
+          component: BusinessAttributionSubscriptionsView,
+          meta: { title: '归因订阅管理', module: '可视化分析' },
         },
         {
           path: 'visual-query/create',
@@ -462,6 +538,21 @@ const router = createRouter({
           meta: { title: '数据隐私', module: '系统管理' },
         },
       ],
+    },
+    {
+      path: '/big-screen-previews/:previewSessionId',
+      component: BigScreenPreviewView,
+      meta: { title: '数字大屏预览' },
+    },
+    {
+      path: '/big-screen-presentations/:planId',
+      component: BigScreenPresentationPlayerView,
+      meta: { title: '数字大屏演播厅投屏' },
+    },
+    {
+      path: '/big-screens/published/:screenId',
+      component: BigScreenPublishedView,
+      meta: { title: '数字大屏发布页' },
     },
   ],
 })
