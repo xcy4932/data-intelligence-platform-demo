@@ -38,6 +38,8 @@ import VisualModelingEditorPage from '@/views/metadata/VisualModelingEditorPage.
 import VisualModelingMigrationPage from '@/views/metadata/VisualModelingMigrationPage.vue'
 import VisualModelingRecycleBinPage from '@/views/metadata/VisualModelingRecycleBinPage.vue'
 import VisualModelingTaskListPage from '@/views/metadata/VisualModelingTaskListPage.vue'
+import UserBehaviorDataManagementView from '@/views/metadata/UserBehaviorDataManagementView.vue'
+import TagSystemView from '@/views/user-insight/TagSystemView.vue'
 import PlaceholderPage from '@/views/PlaceholderPage.vue'
 
 const router = createRouter({
@@ -354,12 +356,160 @@ const router = createRouter({
           component: IdMappingView,
           meta: { title: 'ID-Mapping 高级配置', module: '元数据管理', idmTab: 'settings' },
         },
+        {
+          path: 'data-management',
+          redirect: '/data-management/access/overview',
+        },
+        {
+          path: 'data-management/access/overview',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 接入概览', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/access/report-url',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 数据上报地址', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/access/schema',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 数据格式', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/access/visual-integration',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 可视化数据集成', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/events',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 一般事件', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/event-properties',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 事件属性', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/user-properties',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 用户属性', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/virtual-events',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 虚拟事件', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/virtual-properties',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 虚拟属性', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/visual-events',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 圈选事件', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/passive-relation-events',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 被动和关系事件', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/session',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 会话管理', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/metadata/custom-session',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 自定义 Session', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/efficiency/event-categories',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 事件分类', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/efficiency/dimension-dictionary',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 维度字典', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/efficiency/lineage',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 埋点血缘', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/tracking/realtime-verify',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 埋点实时验证', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/tracking/reports',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 验证报告', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/governance/dashboard',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 数据治理看板', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/governance/ingestion-detail',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 数据入库明细', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/governance/rules',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 校验规则配置', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/governance/alerts',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 告警管理', module: '元数据管理' },
+        },
+        {
+          path: 'data-management/governance/cost',
+          component: UserBehaviorDataManagementView,
+          meta: { title: '行为数据管理 - 成本治理分析', module: '元数据管理' },
+        },
 
         // 用户洞察
         {
           path: 'user-insight/tags',
-          component: PlaceholderPage,
-          meta: { title: '标签管理', module: '用户洞察' },
+          component: TagSystemView,
+          meta: { title: '标签体系', module: '用户洞察', tagPage: 'home' },
+        },
+        {
+          path: 'user-insight/tags/manage',
+          redirect: '/user-insight/tags',
+        },
+        {
+          path: 'user-insight/tags/templates',
+          component: TagSystemView,
+          meta: { title: '标签模板', module: '用户洞察', tagPage: 'templates' },
+        },
+        {
+          path: 'user-insight/tags/metadata',
+          component: TagSystemView,
+          meta: { title: '标签元信息管理', module: '用户洞察', tagPage: 'metadata' },
+        },
+        {
+          path: 'user-insight/tags/create/:tagType',
+          component: TagSystemView,
+          meta: { title: '新建标签', module: '用户洞察', tagPage: 'create' },
+        },
+        {
+          path: 'user-insight/tags/:tagId/edit',
+          component: TagSystemView,
+          meta: { title: '编辑标签', module: '用户洞察', tagPage: 'edit' },
+        },
+        {
+          path: 'user-insight/tags/:tagId',
+          component: TagSystemView,
+          meta: { title: '标签详情', module: '用户洞察', tagPage: 'detail' },
         },
         {
           path: 'user-insight/tag-subscriptions',

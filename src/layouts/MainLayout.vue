@@ -84,6 +84,65 @@ const menuOptions: MenuOption[] = [
       { label: '维度管理', key: '/metadata/dimensions' },
       { label: '报表管理', key: '/metadata/reports' },
       { label: '可视化建模', key: '/metadata/visual-modeling' },
+      {
+        label: '行为数据管理',
+        key: 'metadata-behavior-data',
+        children: [
+          {
+            label: '数据接入',
+            key: 'metadata-behavior-access',
+            children: [
+              { label: '接入概览', key: '/data-management/access/overview' },
+              { label: '数据上报地址', key: '/data-management/access/report-url' },
+              { label: '数据格式', key: '/data-management/access/schema' },
+              { label: '可视化数据集成', key: '/data-management/access/visual-integration' },
+            ],
+          },
+          {
+            label: '元数据管理',
+            key: 'metadata-behavior-metadata',
+            children: [
+              { label: '一般事件', key: '/data-management/metadata/events' },
+              { label: '事件属性', key: '/data-management/metadata/event-properties' },
+              { label: '用户属性', key: '/data-management/metadata/user-properties' },
+              { label: '虚拟事件', key: '/data-management/metadata/virtual-events' },
+              { label: '虚拟属性', key: '/data-management/metadata/virtual-properties' },
+              { label: '圈选事件', key: '/data-management/metadata/visual-events' },
+              { label: '被动和关系事件', key: '/data-management/metadata/passive-relation-events' },
+              { label: '会话管理', key: '/data-management/metadata/session' },
+              { label: '自定义 Session', key: '/data-management/metadata/custom-session' },
+            ],
+          },
+          {
+            label: '分类管理功能',
+            key: 'metadata-behavior-efficiency',
+            children: [
+              { label: '事件分类', key: '/data-management/efficiency/event-categories' },
+              { label: '维度字典', key: '/data-management/efficiency/dimension-dictionary' },
+              { label: '埋点血缘', key: '/data-management/efficiency/lineage' },
+            ],
+          },
+          {
+            label: '埋点验证',
+            key: 'metadata-behavior-tracking',
+            children: [
+              { label: '埋点实时验证', key: '/data-management/tracking/realtime-verify' },
+              { label: '验证报告', key: '/data-management/tracking/reports' },
+            ],
+          },
+          {
+            label: '数据治理',
+            key: 'metadata-behavior-governance',
+            children: [
+              { label: '数据治理看板', key: '/data-management/governance/dashboard' },
+              { label: '数据入库明细', key: '/data-management/governance/ingestion-detail' },
+              { label: '校验规则配置', key: '/data-management/governance/rules' },
+              { label: '告警管理', key: '/data-management/governance/alerts' },
+              { label: '成本治理分析', key: '/data-management/governance/cost' },
+            ],
+          },
+        ],
+      },
       { label: '数据连接', key: '/data-fusion/connections' },
       { label: 'ID 图谱构建', key: '/data-fusion/id-mapping' },
     ],
