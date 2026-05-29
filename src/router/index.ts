@@ -2,12 +2,14 @@ import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
 import EventAnalysisView from '@/views/data-insight/EventAnalysisView.vue'
 import AttributionAnalysisView from '@/views/data-insight/AttributionAnalysisView.vue'
+import AdAnalysisView from '@/views/data-insight/AdAnalysisView.vue'
 import DistributionAnalysisView from '@/views/data-insight/DistributionAnalysisView.vue'
 import FunnelAnalysisView from '@/views/data-insight/FunnelAnalysisView.vue'
 import HeatmapAnalysisView from '@/views/data-insight/HeatmapAnalysisView.vue'
 import LtvAnalysisView from '@/views/data-insight/LtvAnalysisView.vue'
 import RetentionAnalysisView from '@/views/data-insight/RetentionAnalysisView.vue'
 import UserPathAnalysisView from '@/views/data-insight/UserPathAnalysisView.vue'
+import AbTestingWorkbenchView from '@/views/ab-testing/AbTestingWorkbenchView.vue'
 import DashboardView from '@/views/dashboard/DashboardView.vue'
 import AssetCollectionView from '@/views/analysis-center/AssetCollectionView.vue'
 import DashboardDetailView from '@/views/analysis-center/DashboardDetailView.vue'
@@ -39,8 +41,15 @@ import VisualModelingMigrationPage from '@/views/metadata/VisualModelingMigratio
 import VisualModelingRecycleBinPage from '@/views/metadata/VisualModelingRecycleBinPage.vue'
 import VisualModelingTaskListPage from '@/views/metadata/VisualModelingTaskListPage.vue'
 import UserBehaviorDataManagementView from '@/views/metadata/UserBehaviorDataManagementView.vue'
+import IndividualProfileView from '@/views/user-insight/IndividualProfileView.vue'
+import GroupProfileInsightView from '@/views/user-insight/GroupProfileInsightView.vue'
+import MultidimensionalFeatureAnalysisView from '@/views/user-insight/MultidimensionalFeatureAnalysisView.vue'
+import LifecycleAnalysisView from '@/views/user-insight/LifecycleAnalysisView.vue'
 import TagSystemView from '@/views/user-insight/TagSystemView.vue'
+import UserSegmentView from '@/views/user-insight/UserSegmentView.vue'
 import PlaceholderPage from '@/views/PlaceholderPage.vue'
+import { adAnalysisService } from '@/services/adAnalysisService'
+import { profilePermissionSet } from '@/mock/profiles'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -517,14 +526,129 @@ const router = createRouter({
           meta: { title: '标签订阅', module: '用户洞察' },
         },
         {
+          path: 'user-insight/lifecycle-analysis',
+          component: LifecycleAnalysisView,
+          meta: { title: '生命周期分析', module: '用户洞察' },
+        },
+        {
+          path: 'user-insight/lifecycle-analysis/:reportId',
+          component: LifecycleAnalysisView,
+          meta: { title: '生命周期分析详情', module: '用户洞察' },
+        },
+        {
           path: 'user-insight/segments',
-          component: PlaceholderPage,
-          meta: { title: '用户分群', module: '用户洞察' },
+          component: UserSegmentView,
+          meta: { title: '用户分群', module: '用户洞察', segmentPage: 'home' },
+        },
+        {
+          path: 'user-insight/segments/create/:method',
+          component: UserSegmentView,
+          meta: { title: '创建分群', module: '用户洞察', segmentPage: 'create' },
+        },
+        {
+          path: 'user-insight/segments/conversion',
+          component: UserSegmentView,
+          meta: { title: '分群主体转换', module: '用户洞察', segmentPage: 'conversion' },
+        },
+        {
+          path: 'user-insight/segments/groups',
+          component: UserSegmentView,
+          meta: { title: '分组管理', module: '用户洞察', segmentPage: 'groups' },
+        },
+        {
+          path: 'user-insight/segments/:segmentId/edit',
+          component: UserSegmentView,
+          meta: { title: '编辑分群', module: '用户洞察', segmentPage: 'edit' },
+        },
+        {
+          path: 'user-insight/segments/:segmentId/runs',
+          component: UserSegmentView,
+          meta: { title: '分群运行记录', module: '用户洞察', segmentPage: 'runs' },
+        },
+        {
+          path: 'user-insight/segments/:segmentId/lineage',
+          component: UserSegmentView,
+          meta: { title: '分群数据血缘', module: '用户洞察', segmentPage: 'lineage' },
+        },
+        {
+          path: 'user-insight/segments/:segmentId',
+          component: UserSegmentView,
+          meta: { title: '分群详情', module: '用户洞察', segmentPage: 'detail' },
         },
         {
           path: 'user-insight/profiles',
-          component: PlaceholderPage,
-          meta: { title: '用户画像', module: '用户洞察' },
+          component: IndividualProfileView,
+          meta: { title: '个体画像', module: '用户洞察', profilePage: 'search' },
+        },
+        {
+          path: 'user-insight/profile-config',
+          component: IndividualProfileView,
+          meta: { title: '个体画像配置', module: '用户洞察', profilePage: 'config' },
+        },
+        {
+          path: 'user-insight/group-profiles',
+          component: GroupProfileInsightView,
+          meta: { title: '私域群体画像', module: '用户洞察', groupProfilePage: 'list' },
+        },
+        {
+          path: 'user-insight/group-profiles/new',
+          component: GroupProfileInsightView,
+          meta: { title: '新建群体画像报告', module: '用户洞察', groupProfilePage: 'new' },
+        },
+        {
+          path: 'user-insight/group-profiles/templates',
+          component: GroupProfileInsightView,
+          meta: { title: '群体画像模板管理', module: '用户洞察', groupProfilePage: 'templates' },
+        },
+        {
+          path: 'user-insight/group-profiles/tgi',
+          component: GroupProfileInsightView,
+          meta: { title: '群体画像 TGI 配置', module: '用户洞察', groupProfilePage: 'tgi' },
+        },
+        {
+          path: 'user-insight/group-profiles/:reportId/edit',
+          component: GroupProfileInsightView,
+          meta: { title: '编辑群体画像报告', module: '用户洞察', groupProfilePage: 'edit' },
+        },
+        {
+          path: 'user-insight/group-profiles/:reportId/label-analysis',
+          component: GroupProfileInsightView,
+          meta: { title: '标签分析详情', module: '用户洞察', groupProfilePage: 'detail' },
+        },
+        {
+          path: 'user-insight/group-profiles/:reportId/metric-analysis',
+          component: GroupProfileInsightView,
+          meta: { title: '指标分析详情', module: '用户洞察', groupProfilePage: 'detail' },
+        },
+        {
+          path: 'user-insight/group-profiles/:reportId',
+          component: GroupProfileInsightView,
+          meta: { title: '群体画像报告详情', module: '用户洞察', groupProfilePage: 'detail' },
+        },
+        {
+          path: 'user-insight/multidim-features',
+          component: MultidimensionalFeatureAnalysisView,
+          meta: { title: '多维特征分析', module: '用户洞察', multiDimPage: 'list' },
+        },
+        {
+          path: 'user-insight/multidim-features/new',
+          component: MultidimensionalFeatureAnalysisView,
+          meta: { title: '新建多维特征分析报告', module: '用户洞察', multiDimPage: 'new' },
+        },
+        {
+          path: 'user-insight/multidim-features/:reportId/edit',
+          component: MultidimensionalFeatureAnalysisView,
+          meta: { title: '编辑多维特征分析报告', module: '用户洞察', multiDimPage: 'edit' },
+        },
+        {
+          path: 'user-insight/multidim-features/:reportId',
+          component: MultidimensionalFeatureAnalysisView,
+          meta: { title: '多维特征分析报告详情', module: '用户洞察', multiDimPage: 'detail' },
+        },
+        {
+          path: 'user-insight/profiles/:subjectType/:baseId',
+          component: IndividualProfileView,
+          meta: { title: '个体画像详情', module: '用户洞察', profilePage: 'detail' },
         },
 
         // 数据洞察
@@ -568,6 +692,31 @@ const router = createRouter({
           meta: { title: '归因分析', module: '数据洞察' },
         },
         {
+          path: 'data-insight/ad-analysis',
+          component: AdAnalysisView,
+          meta: { title: '广告投放分析', module: '数据洞察' },
+        },
+        {
+          path: 'data-insight/ad-analysis/templates',
+          component: AdAnalysisView,
+          meta: { title: '广告元数据模板', module: '数据洞察' },
+        },
+        {
+          path: 'data-insight/ad-analysis/templates/new',
+          component: AdAnalysisView,
+          meta: { title: '新建广告元数据模板', module: '数据洞察' },
+        },
+        {
+          path: 'data-insight/ad-analysis/reports/:reportId',
+          component: AdAnalysisView,
+          meta: { title: '广告投放分析报告', module: '数据洞察' },
+        },
+        {
+          path: 'data-insight/ad-analysis/ad-report',
+          component: AdAnalysisView,
+          meta: { title: '广告投放报表', module: '数据洞察' },
+        },
+        {
           path: 'data-insight/ltv',
           component: LtvAnalysisView,
           meta: { title: 'LTV 分析', module: '数据洞察' },
@@ -608,23 +757,61 @@ const router = createRouter({
         // A/B 测试
         {
           path: 'ab-testing/overview',
-          component: PlaceholderPage,
-          meta: { title: '实验概览', module: 'A/B 测试' },
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验概览', module: 'A/B 测试', abPage: 'overview' },
         },
         {
           path: 'ab-testing/experiments',
-          component: PlaceholderPage,
-          meta: { title: '实验列表', module: 'A/B 测试' },
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验列表', module: 'A/B 测试', abPage: 'experiments' },
         },
         {
           path: 'ab-testing/create',
-          component: PlaceholderPage,
-          meta: { title: '实验创建', module: 'A/B 测试' },
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验创建', module: 'A/B 测试', abPage: 'create' },
+        },
+        {
+          path: 'abtest/experiments/create/type',
+          redirect: '/ab-testing/create',
         },
         {
           path: 'ab-testing/results',
-          component: PlaceholderPage,
-          meta: { title: '实验结果', module: 'A/B 测试' },
+          redirect: '/ab-testing/reports',
+        },
+        {
+          path: 'ab-testing/reports',
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验报告', module: 'A/B 测试', abPage: 'reports' },
+        },
+        {
+          path: 'ab-testing/experiments/:experimentId/report',
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验详情', module: 'A/B 测试', abPage: 'reports' },
+        },
+        {
+          path: 'ab-testing/metrics',
+          component: AbTestingWorkbenchView,
+          meta: { title: '指标管理', module: 'A/B 测试', abPage: 'metrics' },
+        },
+        {
+          path: 'ab-testing/features',
+          component: AbTestingWorkbenchView,
+          meta: { title: '配置管理', module: 'A/B 测试', abPage: 'features' },
+        },
+        {
+          path: 'ab-testing/traffic',
+          component: AbTestingWorkbenchView,
+          meta: { title: '流量管理', module: 'A/B 测试', abPage: 'traffic' },
+        },
+        {
+          path: 'ab-testing/tools',
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验工具箱', module: 'A/B 测试', abPage: 'tools' },
+        },
+        {
+          path: 'ab-testing/boards',
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验看板', module: 'A/B 测试', abPage: 'boards' },
         },
 
         // 监控中心
@@ -705,6 +892,39 @@ const router = createRouter({
       meta: { title: '数字大屏发布页' },
     },
   ],
+})
+
+router.beforeEach(async (to) => {
+  if (to.path.startsWith('/user-insight/profiles') && !profilePermissionSet.viewProfile) {
+    return '/dashboard'
+  }
+  if (to.path.startsWith('/user-insight/profile-config') && !profilePermissionSet.projectConfig) {
+    return '/user-insight/profiles'
+  }
+  if (to.path.startsWith('/data-insight/ad-analysis')) {
+    try {
+      await adAnalysisService.getAccessContext()
+      const decision = await adAnalysisService.getAccessDecision()
+      if (decision.reasons.includes('no_permission') || decision.reasons.includes('version_closed')) {
+        return {
+          path: '/dashboard',
+          query: { adAccessDenied: decision.message ?? '暂无广告投放分析访问权限' },
+        }
+      }
+      if (!decision.available && to.path !== '/data-insight/ad-analysis') {
+        return {
+          path: '/data-insight/ad-analysis',
+          query: { adAccessState: decision.reasons[0] ?? 'not_available' },
+        }
+      }
+    } catch {
+      return {
+        path: '/dashboard',
+        query: { adAccessDenied: '广告投放分析入口暂不可用，请稍后重试' },
+      }
+    }
+  }
+  return true
 })
 
 export default router

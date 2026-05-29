@@ -77,7 +77,7 @@ export const dashboardRecommendations: DashboardRecommendation[] = [
     reason: 'C 组观看次数提升最高，但 7 日留存略低于基线，需要继续验证。',
     priority: 'medium',
     expectedImpact: '若风险收敛，可再提升 3% 到 5% 广告观看次数',
-    actionRoute: '/ab-testing/results',
+    actionRoute: '/ab-testing/reports',
   },
   {
     id: 'rec-fix-android-entry',

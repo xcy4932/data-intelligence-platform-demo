@@ -1796,7 +1796,7 @@ const applyCustomView = (viewId: EntityId): void => {
   selectedValueTypes.value = [...(view.filters.valueTypes ?? [])]
   selectedRunStatuses.value = [...(view.filters.runStatuses ?? [])]
   managerStatus.value = view.filters.statuses?.[0] ?? 'all'
-  metadataFilters.value = { ...(view.filters.metadata ?? {}) }
+  metadataFilters.value = { ...view.filters.metadata }
 }
 
 const resetWorkbench = (): void => {
@@ -2215,7 +2215,7 @@ onMounted(async () => {
                 <n-button v-if="currentDetail.permissions.canManage" @click="openAuthModal(currentDetail)">授权</n-button>
                 <n-button v-if="currentDetail.status !== 'online'" type="primary" @click="openShelfModal([currentDetail.id], 'online')">上架</n-button>
                 <n-button v-if="currentDetail.status === 'online'" @click="openShelfModal([currentDetail.id], 'offline')">下架</n-button>
-                <n-button v-if="currentDetail.type === 'lifecycle'" @click="navigateTab('/data-insight/ltv?tagId=' + currentDetail.id)">生命周期分析</n-button>
+                <n-button v-if="currentDetail.type === 'lifecycle'" @click="navigateTab('/user-insight/lifecycle-analysis?tagId=' + currentDetail.id)">生命周期分析</n-button>
                 <n-button v-if="currentDetail.permissions.canManage" type="error" @click="openDeleteModal(currentDetail)">删除</n-button>
               </n-space>
             </div>
@@ -2252,7 +2252,7 @@ onMounted(async () => {
                       <td>
                         <n-space size="small">
 	                          <n-button text size="small" @click="openSegmentModal(item.value)">存为分群</n-button>
-                          <n-button text size="small" @click="navigateTab('/user-insight/profiles?tagId=' + currentDetail.id + '&value=' + item.value)">查看个体明细</n-button>
+	                          <n-button text size="small" @click="navigateTab('/user-insight/profiles?tagId=' + currentDetail.id + '&tagValue=' + encodeURIComponent(item.value) + '&subject=user&source=tag')">查看个体明细</n-button>
                         </n-space>
                       </td>
                     </tr>

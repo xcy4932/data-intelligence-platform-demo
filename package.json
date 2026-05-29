@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
+    "test:ad-analysis": "node --experimental-strip-types --test tests/ad-analysis-regression.test.mjs",
+    "test:ab-testing": "node --experimental-strip-types --test tests/ab-testing-rules.test.mjs",
     "lint": "run-s lint:*",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",

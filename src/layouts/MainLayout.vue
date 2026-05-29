@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import type { MenuOption } from 'naive-ui'
@@ -16,6 +16,7 @@ import {
   NMenu,
   NSpace,
   NText,
+  useMessage,
 } from 'naive-ui'
 import {
   AnalyticsOutline,
@@ -30,6 +31,12 @@ import {
   ShieldCheckmarkOutline,
   TrailSignOutline,
 } from '@vicons/ionicons5'
+import { adAnalysisService } from '@/services/adAnalysisService'
+import { groupProfilePermissionSet } from '@/mock/groupProfileInsight'
+import { multiDimPermissionSet } from '@/mock/multidimensionalFeatureAnalysis'
+import { profilePermissionSet } from '@/mock/profiles'
+import { segmentPermissionSet } from '@/mock/segments'
+import type { AdAccessDecision } from '@/types/adAnalysis'
 
 function renderIcon(icon: Component) {
   return () => h(NIcon, null, { default: () => h(icon) })
@@ -38,8 +45,47 @@ function renderIcon(icon: Component) {
 const collapsed = ref(false)
 const route = useRoute()
 const router = useRouter()
+const message = useMessage()
+const adAccessLoaded = ref(false)
+const adAccessDecision = ref<AdAccessDecision | null>(null)
 
-const menuOptions: MenuOption[] = [
+onMounted(async () => {
+  try {
+    await adAnalysisService.getAccessContext()
+    adAccessDecision.value = await adAnalysisService.getAccessDecision()
+  } catch {
+    adAccessDecision.value = {
+      available: false,
+      reasons: ['no_permission'],
+      message: '广告投放分析入口暂不可用。',
+    }
+    message.warning('广告投放分析入口暂不可用。')
+  } finally {
+    adAccessLoaded.value = true
+  }
+})
+
+const adAnalysisMenuEntries = computed<MenuOption[]>(() => {
+  if (!adAccessLoaded.value || !adAccessDecision.value) return []
+  if (
+    adAccessDecision.value.reasons.includes('no_permission') ||
+    adAccessDecision.value.reasons.includes('version_closed')
+  ) {
+    return []
+  }
+  if (!adAccessDecision.value.available) {
+    return [
+      {
+        label: `广告投放分析（${adAccessDecision.value.message ?? '未开通'}）`,
+        key: '/data-insight/ad-analysis',
+        disabled: true,
+      },
+    ]
+  }
+  return [{ label: '广告投放分析', key: '/data-insight/ad-analysis' }]
+})
+
+const menuOptions = computed<MenuOption[]>(() => [
   {
     label: '首页驾驶舱',
     key: '/dashboard',
@@ -154,8 +200,22 @@ const menuOptions: MenuOption[] = [
     children: [
       { label: '标签管理', key: '/user-insight/tags' },
       { label: '标签订阅', key: '/user-insight/tag-subscriptions' },
-      { label: '用户分群', key: '/user-insight/segments' },
-      { label: '用户画像', key: '/user-insight/profiles' },
+      { label: '生命周期分析', key: '/user-insight/lifecycle-analysis' },
+      ...(segmentPermissionSet.viewSegment ? [{ label: '用户分群', key: '/user-insight/segments' }] : []),
+      ...(profilePermissionSet.viewProfile
+        ? [
+            {
+              label: '用户画像',
+              key: 'user-profile',
+              children: [
+                { label: '个体画像', key: '/user-insight/profiles' },
+                ...(groupProfilePermissionSet.viewReport ? [{ label: '私域群体画像', key: '/user-insight/group-profiles' }] : []),
+                ...(multiDimPermissionSet.viewReport ? [{ label: '多维特征分析', key: '/user-insight/multidim-features' }] : []),
+                ...(profilePermissionSet.projectConfig ? [{ label: '个体画像配置', key: '/user-insight/profile-config' }] : []),
+              ],
+            },
+          ]
+        : []),
     ],
   },
   {
@@ -170,6 +230,7 @@ const menuOptions: MenuOption[] = [
       { label: '热力图分析', key: '/data-insight/heatmap' },
       { label: '分布分析', key: '/data-insight/distribution' },
       { label: '归因分析', key: '/data-insight/attribution' },
+      ...adAnalysisMenuEntries.value,
       { label: 'LTV 分析', key: '/data-insight/ltv' },
     ],
   },
@@ -194,7 +255,12 @@ const menuOptions: MenuOption[] = [
       { label: '实验概览', key: '/ab-testing/overview' },
       { label: '实验列表', key: '/ab-testing/experiments' },
       { label: '实验创建', key: '/ab-testing/create' },
-      { label: '实验结果', key: '/ab-testing/results' },
+      { label: '实验报告', key: '/ab-testing/reports' },
+      { label: '指标管理', key: '/ab-testing/metrics' },
+      { label: '配置管理', key: '/ab-testing/features' },
+      { label: '流量管理', key: '/ab-testing/traffic' },
+      { label: '实验工具箱', key: '/ab-testing/tools' },
+      { label: '实验看板', key: '/ab-testing/boards' },
     ],
   },
   {
@@ -229,7 +295,7 @@ const menuOptions: MenuOption[] = [
       { label: '数据隐私', key: '/system/privacy' },
     ],
   },
-]
+])
 
 const selectedKeys = computed(() => [route.path])
 const inlineReportMode = computed(() => route.path.includes('/business-attribution/reports/') && String(route.query.Inline ?? route.query.inline) === 'true')
