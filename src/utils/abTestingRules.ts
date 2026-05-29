@@ -7,6 +7,8 @@ import type {
   AudienceRule,
   FeatureDecisionResult,
   FeatureFlag,
+  FeaturePublishStatus,
+  FeatureStatus,
   FeatureVersion,
   SmoothEffectTask,
 } from '@/types/abTesting'
@@ -117,9 +119,10 @@ const actionPermissionLevel: Record<string, AbPermissionLevel> = {
   create_metric: 'collaborate',
   manage_metric: 'admin',
   create_feature: 'collaborate',
-  publish_feature: 'admin',
-  rollback_feature: 'admin',
-  delete_feature: 'admin',
+  publish_feature: 'collaborate',
+  rollback_feature: 'collaborate',
+  delete_feature: 'collaborate',
+  manage_feature_permission: 'collaborate',
 }
 
 const permissionRank: Record<AbPermissionLevel, number> = {
@@ -158,6 +161,31 @@ export function canUseAbAction(
     requiredLevel,
     reason: allowed ? '权限满足操作要求' : `需要 ${requiredLevel} 权限，当前为 ${grantedLevel}`,
   }
+}
+
+const allowedFeatureStatusTransitions: Record<FeatureStatus, FeatureStatus[]> = {
+  enabled: ['disabled'],
+  disabled: ['enabled', 'deleted'],
+  deleted: [],
+}
+
+const allowedFeaturePublishStatusTransitions: Record<FeaturePublishStatus, FeaturePublishStatus[]> = {
+  unpublished: ['pending_publish', 'gray', 'publish_confirm', 'full', 'disabled'],
+  pending_publish: ['gray', 'canceled'],
+  gray: ['full', 'rolled_back'],
+  publish_confirm: ['gray', 'full', 'rolled_back'],
+  full: ['rolled_back'],
+  rolled_back: ['disabled'],
+  disabled: ['canceled'],
+  canceled: [],
+}
+
+export function canTransitionFeatureStatus(from: FeatureStatus, to: FeatureStatus) {
+  return allowedFeatureStatusTransitions[from].includes(to)
+}
+
+export function canTransitionFeaturePublishStatus(from: FeaturePublishStatus, to: FeaturePublishStatus) {
+  return allowedFeaturePublishStatusTransitions[from].includes(to)
 }
 
 export function validateExperimentParamValue(
@@ -348,7 +376,7 @@ export function evaluateFeatureDecision(input: {
   }
 
   const trafficBucket = stableBucket(`${input.feature.appId}:${input.feature.key}:${input.version.versionId}:${input.userId}`)
-  if (trafficBucket > input.version.publishTraffic) {
+  if (trafficBucket >= input.version.publishTraffic) {
     return localDefaultDecision(featureKey, input.localDefault, 'traffic_not_hit')
   }
 
@@ -413,6 +441,12 @@ function matchesAudienceRule(rule: AudienceRule, context: Record<string, unknown
   return rule.conditions.every((condition) => {
     const actual = context[condition.fieldName]
     const expected = condition.value
+    if (
+      condition.fieldSource === 'custom_variable' &&
+      (actual === undefined || actual === null || actual === '')
+    ) {
+      return false
+    }
     switch (condition.operator) {
       case 'eq':
         return actual === expected

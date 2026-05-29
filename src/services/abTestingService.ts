@@ -16,7 +16,12 @@ import {
   abHeatmapReports,
   abHitQueryTemplates,
   abMabReports,
+  abAlarmTriggerRecords,
+  abTemporaryRetentionQueryResults,
+  abMetricBindingSnapshots,
+  abMetricDirectoryGroups,
   abMetricGroups,
+  abMetricPermissionRoles,
   abMetricResults,
   abMetrics,
   abMetricTemplates,
@@ -38,7 +43,11 @@ import {
 import type {
   AbExperimentAction,
   AbExperimentStatus,
+  AbPermissionLevel,
+  AbUserPermissionContext,
   AlarmTask,
+  AlarmTriggerRecord,
+  AudienceRule,
   BackendIntegrationStatus,
   BoardDiffResult,
   DataDedupTask,
@@ -62,6 +71,7 @@ import type {
   FeatureLifecycleAction,
   FeaturePublishRequest,
   FeatureSolidifyRequest,
+  FeatureVariant,
   FeatureVersion,
   FeatureVersionDraft,
   HitDiagnosisResult,
@@ -69,11 +79,20 @@ import type {
   HitQueryResult,
   HitQueryTemplate,
   Metric,
+  MetricBindingSnapshot,
+  MetricDirectoryGroup,
   MetricGroup,
+  MetricGroupEditorPayload,
+  MetricPermissionRoleMatrix,
+  MetricTemplate,
+  MetricStatisticResult,
   OperationLog,
   PublishPlan,
+  ReceiverGroup,
   ReportExportTask,
   ReportFilter,
+  TemporaryRetentionQueryPayload,
+  TemporaryRetentionQueryResult,
   SmoothEffectTaskOperation,
   SmoothEffectTask,
   UniformDiversionConfig,
@@ -84,8 +103,13 @@ import type { EntityId } from '@/types/common'
 import {
   calculateSmoothTraffic,
   calculateTrafficRecommendation,
+  canTransitionFeaturePublishStatus,
+  canTransitionFeatureStatus,
+  canUseAbAction,
   evaluateFeatureDecision,
+  getAbPermissionLevel,
   getExperimentActionAvailability,
+  validateMetricFormula,
   validateExperimentParamValue,
   validateTrafficRatios,
 } from '@/utils/abTestingRules'
@@ -105,6 +129,18 @@ const findFeatureVersion = (versionId: EntityId) =>
   abFeatureVersions.find((version) => version.versionId === versionId)
 
 const currentOperator = { id: 'user_growth_lin', name: '林哲', department: '增长运营团队' }
+const servicePermissionContext: AbUserPermissionContext = {
+  userId: currentOperator.id,
+  roles: ['EXPERIMENT_OWNER'],
+  permissions: {
+    experiment_create: true,
+    view_report: true,
+    export_report: true,
+    create_metric: true,
+    create_feature: true,
+    publish_feature: true,
+  },
+}
 const appMembers = [
   currentOperator,
   { id: 'user_data_zhou', name: '周婧', department: '商业化数据团队' },
@@ -117,9 +153,110 @@ const createId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().to
 const nowIso = () => new Date().toISOString()
 
 const paramKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/
+const featureKeyPattern = /^[A-Za-z0-9_]+$/
+const featureNamePattern = /^[\u4e00-\u9fa5A-Za-z0-9_]+$/
+const whitelistUserIdPattern = /^[A-Za-z0-9_@.-]{1,128}$/
+
+function numberPrecision(value: number) {
+  const [integerPart = '', decimalPart = ''] = String(Math.abs(value)).split('.')
+  return { integerDigits: integerPart.replace(/^0+/, '').length || 1, decimalDigits: decimalPart.length }
+}
+
+function validateFeatureVariantRules(
+  variantType: FeatureVersion['variantType'],
+  variants: FeatureVariant[],
+  audienceRules: AudienceRule[],
+  defaultRule: AudienceRule,
+) {
+  const errors: string[] = []
+  const variantIds = new Set<EntityId>()
+  const stringValues = new Set<string>()
+  for (const variant of variants) {
+    if (!variant.variantId || variantIds.has(variant.variantId)) errors.push('变体 ID 不能为空且不能重复')
+    variantIds.add(variant.variantId)
+    if (!variant.name.trim()) errors.push('变体名称不能为空')
+    if (variantType === 'boolean' && typeof variant.value !== 'boolean') {
+      errors.push('boolean 变体值只能为 true 或 false')
+    }
+    if (variantType === 'string') {
+      const value = typeof variant.value === 'string' ? variant.value : String(variant.value ?? '')
+      if (!value) errors.push('string 变体值不能为空')
+      if (stringValues.has(value)) errors.push('string 变体值不允许重复')
+      stringValues.add(value)
+    }
+    if (variantType === 'number') {
+      if (typeof variant.value !== 'number' || !Number.isFinite(variant.value)) {
+        errors.push('number 变体值必须为合法数字')
+      } else {
+        const precision = numberPrecision(variant.value)
+        if (precision.integerDigits > 10) errors.push('number 变体整数位最多 10 位')
+        if (precision.decimalDigits > 5) errors.push('number 变体小数位最多 5 位')
+      }
+    }
+    if (variantType === 'json' && (typeof variant.value !== 'object' || variant.value === null)) {
+      errors.push('json 变体值必须为合法 JSON')
+    }
+  }
+  if (variantType === 'boolean') {
+    const values = variants.map((variant) => variant.value)
+    if (variants.length !== 2 || !values.includes(true) || !values.includes(false)) {
+      errors.push('boolean 类型必须且只能包含 true / false 两个变体')
+    }
+  }
+  for (const rule of [...audienceRules, defaultRule]) {
+    if (rule.deliveryType === 'single_variant' && (!rule.variantId || !variantIds.has(rule.variantId))) {
+      errors.push('单变体发布规则必须选择存在的变体')
+    }
+    if (rule.deliveryType === 'multi_variant') {
+      const weights = rule.variantWeights ?? []
+      const total = Number(weights.reduce((sum, item) => sum + item.weight, 0).toFixed(3))
+      if (Math.abs(total - 100) > 0.001) errors.push('多变体比例合计必须等于 100%')
+      if (weights.some((item) => !variantIds.has(item.variantId))) errors.push('多变体规则引用了不存在的变体')
+    }
+  }
+  return [...new Set(errors)]
+}
 
 function resolveMember(userId?: string) {
   return appMembers.find((member) => member.id === userId) ?? currentOperator
+}
+
+function getServiceFeaturePermission(feature: FeatureFlag): AbPermissionLevel {
+  return getAbPermissionLevel(servicePermissionContext, {
+    ownerIds: feature.owners,
+    visibility: feature.featureType,
+  })
+}
+
+function canViewServiceFeature(feature?: FeatureFlag) {
+  return Boolean(feature && getServiceFeaturePermission(feature) !== 'none')
+}
+
+function canOperateServiceFeature(feature: FeatureFlag | undefined, action: string) {
+  if (!feature) return false
+  const grantedLevel = getServiceFeaturePermission(feature)
+  if (grantedLevel === 'none') return false
+  return canUseAbAction(servicePermissionContext, action, grantedLevel).allowed
+}
+
+function featurePermissionDeniedMessage(actionLabel: string) {
+  return `暂无 Feature ${actionLabel}权限，请联系 Owner 添加为协作者`
+}
+
+function getFeatureIdFromOperationLog(log: OperationLog) {
+  if (log.objectType === 'FEATURE') return log.objectId
+  if (log.objectType === 'FEATURE_VERSION') return findFeatureVersion(log.objectId)?.featureId
+  const featurePayload = log.after?.feature
+  if (featurePayload && typeof featurePayload === 'object' && 'featureId' in featurePayload) {
+    return String((featurePayload as Pick<FeatureFlag, 'featureId'>).featureId)
+  }
+  return undefined
+}
+
+function canViewOperationLog(log: OperationLog) {
+  const featureId = getFeatureIdFromOperationLog(log)
+  if (!featureId) return true
+  return canViewServiceFeature(findFeature(featureId))
 }
 
 function hasHardcodedGroupParam(schemaKey: string, values: unknown[]) {
@@ -154,12 +291,23 @@ interface CreatedMockState {
   smoothTasks: SmoothEffectTask[]
   permissionGrants: ExperimentPermissionGrant[]
   metricGroups: MetricGroup[]
+  metricDirectoryGroups: MetricDirectoryGroup[]
   metrics: Metric[]
+  metricBindingSnapshots: MetricBindingSnapshot[]
+  metricTemplates: MetricTemplate[]
+  deletedMetricTemplateIds: EntityId[]
+  alarmTasks: AlarmTask[]
+  alarmTriggerRecords: AlarmTriggerRecord[]
+  deletedAlarmTaskIds: EntityId[]
+  receiverGroups: ReceiverGroup[]
+  deletedReceiverGroupIds: EntityId[]
+  temporaryRetentionQueries: TemporaryRetentionQueryResult[]
   reportExportTasks: ReportExportTask[]
   featureFlags: FeatureFlag[]
   featureVersions: FeatureVersion[]
   publishPlans: PublishPlan[]
   whitelistTests: WhitelistTest[]
+  deletedWhitelistTestIds: EntityId[]
   dataDedupTasks: DataDedupTask[]
   experimentBoards: ExperimentBoard[]
   operationLogs: OperationLog[]
@@ -185,12 +333,23 @@ function readCreatedMockState(): CreatedMockState {
     smoothTasks: [],
     permissionGrants: [],
     metricGroups: [],
+    metricDirectoryGroups: [],
     metrics: [],
+    metricBindingSnapshots: [],
+    metricTemplates: [],
+    deletedMetricTemplateIds: [],
+    alarmTasks: [],
+    alarmTriggerRecords: [],
+    deletedAlarmTaskIds: [],
+    receiverGroups: [],
+    deletedReceiverGroupIds: [],
+    temporaryRetentionQueries: [],
     reportExportTasks: [],
     featureFlags: [],
     featureVersions: [],
     publishPlans: [],
     whitelistTests: [],
+    deletedWhitelistTestIds: [],
     dataDedupTasks: [],
     experimentBoards: [],
     operationLogs: [],
@@ -297,12 +456,39 @@ function applyCreatedMockState() {
   mergeById(abSmoothEffectTasks, state.smoothTasks)
   mergeById(abExperimentPermissionGrants, state.permissionGrants)
   mergeById(abMetricGroups, state.metricGroups)
+  mergeById(abMetricDirectoryGroups, state.metricDirectoryGroups)
   mergeById(abMetrics, state.metrics)
+  mergeById(abMetricBindingSnapshots, state.metricBindingSnapshots)
+  mergeById(abMetricTemplates, state.metricTemplates)
+  if (state.deletedMetricTemplateIds.length) {
+    for (let index = abMetricTemplates.length - 1; index >= 0; index -= 1) {
+      if (state.deletedMetricTemplateIds.includes(abMetricTemplates[index]?.id ?? '')) abMetricTemplates.splice(index, 1)
+    }
+  }
+  mergeById(abAlarmTasks, state.alarmTasks)
+  mergeById(abAlarmTriggerRecords, state.alarmTriggerRecords)
+  if (state.deletedAlarmTaskIds.length) {
+    for (let index = abAlarmTasks.length - 1; index >= 0; index -= 1) {
+      if (state.deletedAlarmTaskIds.includes(abAlarmTasks[index]?.id ?? '')) abAlarmTasks.splice(index, 1)
+    }
+  }
+  mergeById(abReceiverGroups, state.receiverGroups)
+  if (state.deletedReceiverGroupIds.length) {
+    for (let index = abReceiverGroups.length - 1; index >= 0; index -= 1) {
+      if (state.deletedReceiverGroupIds.includes(abReceiverGroups[index]?.id ?? '')) abReceiverGroups.splice(index, 1)
+    }
+  }
+  mergeById(abTemporaryRetentionQueryResults, state.temporaryRetentionQueries)
   mergeById(abReportExportTasks, state.reportExportTasks)
   mergeByKey(abFeatureFlags, state.featureFlags, (item) => item.featureId)
   mergeByKey(abFeatureVersions, state.featureVersions, (item) => item.versionId)
   mergeByKey(abPublishPlans, state.publishPlans, (item) => item.publishId)
   mergeById(abWhitelistTests, state.whitelistTests)
+  if (state.deletedWhitelistTestIds.length) {
+    for (let index = abWhitelistTests.length - 1; index >= 0; index -= 1) {
+      if (state.deletedWhitelistTestIds.includes(abWhitelistTests[index]?.id ?? '')) abWhitelistTests.splice(index, 1)
+    }
+  }
   mergeById(abDataDedupTasks, state.dataDedupTasks)
   mergeById(abExperimentBoards, state.experimentBoards)
   upsertById(abOperationLogs, state.operationLogs)
@@ -342,7 +528,37 @@ function persistCreatedMockState(addition: Partial<CreatedMockState>) {
     metricGroups: [...(addition.metricGroups ?? []), ...state.metricGroups].filter(
       (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
     ),
+    metricDirectoryGroups: [...(addition.metricDirectoryGroups ?? []), ...state.metricDirectoryGroups].filter(
+      (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
+    ),
     metrics: [...(addition.metrics ?? []), ...state.metrics].filter(
+      (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
+    ),
+    metricBindingSnapshots: [...(addition.metricBindingSnapshots ?? []), ...state.metricBindingSnapshots].filter(
+      (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
+    ),
+    metricTemplates: [...(addition.metricTemplates ?? []), ...state.metricTemplates].filter(
+      (item, index, items) =>
+        ![...(addition.deletedMetricTemplateIds ?? []), ...state.deletedMetricTemplateIds].includes(item.id) &&
+        items.findIndex((candidate) => candidate.id === item.id) === index,
+    ),
+    deletedMetricTemplateIds: [...new Set([...(addition.deletedMetricTemplateIds ?? []), ...state.deletedMetricTemplateIds])],
+    alarmTasks: [...(addition.alarmTasks ?? []), ...state.alarmTasks].filter(
+      (item, index, items) =>
+        ![...(addition.deletedAlarmTaskIds ?? []), ...state.deletedAlarmTaskIds].includes(item.id) &&
+        items.findIndex((candidate) => candidate.id === item.id) === index,
+    ),
+    alarmTriggerRecords: [...(addition.alarmTriggerRecords ?? []), ...state.alarmTriggerRecords].filter(
+      (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
+    ),
+    deletedAlarmTaskIds: [...new Set([...(addition.deletedAlarmTaskIds ?? []), ...state.deletedAlarmTaskIds])],
+    receiverGroups: [...(addition.receiverGroups ?? []), ...state.receiverGroups].filter(
+      (item, index, items) =>
+        ![...(addition.deletedReceiverGroupIds ?? []), ...state.deletedReceiverGroupIds].includes(item.id) &&
+        items.findIndex((candidate) => candidate.id === item.id) === index,
+    ),
+    deletedReceiverGroupIds: [...new Set([...(addition.deletedReceiverGroupIds ?? []), ...state.deletedReceiverGroupIds])],
+    temporaryRetentionQueries: [...(addition.temporaryRetentionQueries ?? []), ...state.temporaryRetentionQueries].filter(
       (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
     ),
     reportExportTasks: [...(addition.reportExportTasks ?? []), ...state.reportExportTasks].filter(
@@ -358,8 +574,11 @@ function persistCreatedMockState(addition: Partial<CreatedMockState>) {
       (item, index, items) => items.findIndex((candidate) => candidate.publishId === item.publishId) === index,
     ),
     whitelistTests: [...(addition.whitelistTests ?? []), ...state.whitelistTests].filter(
-      (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
+      (item, index, items) =>
+        ![...(addition.deletedWhitelistTestIds ?? []), ...state.deletedWhitelistTestIds].includes(item.id) &&
+        items.findIndex((candidate) => candidate.id === item.id) === index,
     ),
+    deletedWhitelistTestIds: [...new Set([...(addition.deletedWhitelistTestIds ?? []), ...state.deletedWhitelistTestIds])],
     dataDedupTasks: [...(addition.dataDedupTasks ?? []), ...state.dataDedupTasks].filter(
       (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
     ),
@@ -437,9 +656,16 @@ export const abTestingApiPaths = {
   featureVersions: (featureId: EntityId) => `/api/feature-flags/${featureId}/versions`,
   featureVersionPublish: (featureId: EntityId, versionId: EntityId) =>
     `/api/feature-flags/${featureId}/versions/${versionId}/publish`,
+  featureVersionRollback: (featureId: EntityId, versionId: EntityId) =>
+    `/api/feature-flags/${featureId}/versions/${versionId}/rollback`,
   featureRollback: (featureId: EntityId) => `/api/feature-flags/${featureId}/rollback`,
+  featureDisable: (featureId: EntityId) => `/api/feature-flags/${featureId}/disable`,
+  featureEnable: (featureId: EntityId) => `/api/feature-flags/${featureId}/enable`,
+  featurePermission: (featureId: EntityId) => `/api/feature-flags/${featureId}/permission`,
   featureLifecycle: (featureId: EntityId) => `/api/feature-flags/${featureId}/lifecycle`,
+  featurePublishHistory: '/api/feature-flags/publish-history',
   featurePublishPlans: '/api/feature-flags/publish-plans',
+  featureWhitelists: (featureId: EntityId) => `/api/feature-flags/${featureId}/whitelists`,
   featureWhitelistTests: '/api/feature-flags/whitelist-tests',
   featureWhitelistTestsByFeature: (featureId: EntityId) => `/api/feature-flags/${featureId}/whitelist-tests`,
   featureSolidify: '/api/feature-flags/solidify-from-experiment',
@@ -678,6 +904,16 @@ export const validateAbExperimentDraft = (
     const smoothDuration = richDraft.trafficConfig.smoothDurationMinutes ?? 0
     const smoothDurationSuggestionPass =
       richDraft.trafficConfig.effectiveMode === 'IMMEDIATE' || (smoothDuration >= 10 && smoothDuration <= 720)
+    const coreMetric = richDraft.coreMetricId ? abMetrics.find((metric) => metric.id === richDraft.coreMetricId) : undefined
+    const focusMetrics = (richDraft.focusMetricIds ?? [])
+      .map((metricId) => abMetrics.find((metric) => metric.id === metricId))
+      .filter((metric): metric is Metric => Boolean(metric))
+    const allDraftMetrics = [...(coreMetric ? [coreMetric] : []), ...focusMetrics]
+    const hasOfflineDraftMetric =
+      allDraftMetrics.some((metric) => metric.status !== 'active') ||
+      (richDraft.focusMetricIds ?? []).some((metricId) => !abMetrics.some((metric) => metric.id === metricId && metric.status === 'active')) ||
+      (richDraft.coreMetricId ? !coreMetric || coreMetric.status !== 'active' : false)
+    const focusFunnelCount = focusMetrics.filter((metric) => metric.metricCategory === 'funnel').length
 
     items.push(
       {
@@ -844,9 +1080,33 @@ export const validateAbExperimentDraft = (
         step: 5,
       },
       {
-        level: richDraft.metricIds.length > 0 ? 'PASS' : 'ERROR',
+        level: richDraft.metricIds.length > 0 && Boolean(richDraft.coreMetricId) ? 'PASS' : 'ERROR',
         code: 'METRIC_SNAPSHOT',
-        message: richDraft.metricIds.length > 0 ? '已绑定指标快照' : '请至少选择一个实验指标',
+        message:
+          richDraft.metricIds.length > 0 && richDraft.coreMetricId
+            ? '已绑定核心指标和关注指标快照'
+            : '请至少选择一个核心指标，并可配置多个关注指标',
+        step: 6,
+      },
+      {
+        level: coreMetric && coreMetric.status === 'active' && coreMetric.metricCategory !== 'funnel' ? 'PASS' : 'ERROR',
+        code: 'CORE_METRIC_RULE',
+        message:
+          coreMetric && coreMetric.status === 'active' && coreMetric.metricCategory !== 'funnel'
+            ? `核心指标已配置：${coreMetric.name}`
+            : '核心指标必须选择一个使用中的非漏斗指标',
+        step: 6,
+      },
+      {
+        level: focusFunnelCount <= 1 ? 'PASS' : 'ERROR',
+        code: 'FOCUS_FUNNEL_LIMIT',
+        message: focusFunnelCount <= 1 ? '关注指标中漏斗指标数量合法' : '关注指标最多选择一个漏斗指标',
+        step: 6,
+      },
+      {
+        level: hasOfflineDraftMetric ? 'ERROR' : 'PASS',
+        code: 'METRIC_STATUS_ACTIVE',
+        message: hasOfflineDraftMetric ? '已下线或不存在的指标不可用于发布' : '已选指标均为使用中状态',
         step: 6,
       },
       {
@@ -1072,6 +1332,47 @@ export const validateAbExperimentDraft = (
   })
 }
 
+function metricFlexibleValues(metric: Metric): MetricBindingSnapshot['flexibleValues'] {
+  const definition = metric.definition
+  const flexibleProperties =
+    'flexibleProperties' in definition ? definition.flexibleProperties : []
+  return flexibleProperties.map((property) => ({
+    propertyId: property.propertyId,
+    propertyName: property.propertyName,
+    scope: property.scope,
+    operator: property.defaultOperator,
+    value: property.defaultValue,
+    source: 'metric_default' as const,
+  }))
+}
+
+function createMetricBindingSnapshotsForExperiment(experiment: Experiment, capturedAt: string) {
+  return experiment.metricIds
+    .map((metricId) => abMetrics.find((metric) => metric.id === metricId))
+    .filter((metric): metric is Metric => Boolean(metric))
+    .map((metric, index): MetricBindingSnapshot => {
+      const group = abMetricGroups.find((item) => item.id === metric.metricGroupId)
+      return {
+        id: createId('metric_snapshot'),
+        experimentId: experiment.id,
+        metricId: metric.id,
+        metricGroupId: metric.metricGroupId,
+        metricName: metric.name,
+        metricGroupName: group?.name ?? metric.metricGroupId,
+        metricRole: metric.id === experiment.coreMetricId ? 'core' : 'focus',
+        metricCategory: metric.metricCategory,
+        definition: JSON.parse(JSON.stringify(metric.definition)) as Metric['definition'],
+        numberFormat: { ...metric.numberFormat },
+        flexibleValues: metricFlexibleValues(metric),
+        statusAtBinding: metric.status,
+        snapshotVersion:
+          abMetricBindingSnapshots.filter((snapshot) => snapshot.metricId === metric.id).length + index + 1,
+        source: 'experiment_create',
+        capturedAt,
+      }
+    })
+}
+
 export const submitAbExperimentForDebug = async (
   draft: ExperimentDraft,
 ): Promise<{ experiment?: Experiment; validation: ExperimentDraftValidationResult; message: string }> => {
@@ -1100,6 +1401,8 @@ export const submitAbExperimentForDebug = async (
     tags: draft.tags,
     durationDays: draft.durationDays,
     trafficRatio: draft.trafficConfig.experimentTrafficRatio,
+    coreMetricId: draft.coreMetricId,
+    focusMetricIds: draft.focusMetricIds,
     metricIds: draft.metricIds,
     featureIds: draft.featureIds,
     createdAt,
@@ -1192,6 +1495,7 @@ export const submitAbExperimentForDebug = async (
     after: { status: 'DEBUGGING', source: 'create_wizard' },
     createdAt,
   }
+  const metricSnapshots = createMetricBindingSnapshotsForExperiment(experiment, createdAt)
 
   abExperiments.unshift(experiment)
   abExperimentVariants.push(...variants)
@@ -1200,6 +1504,7 @@ export const submitAbExperimentForDebug = async (
   abTrafficConfigs.push(trafficConfig)
   abUniformDiversionConfigs.push(uniformConfig)
   if (smoothTask) abSmoothEffectTasks.push(smoothTask)
+  abMetricBindingSnapshots.unshift(...metricSnapshots)
   abOperationLogs.unshift(operationLog)
   persistCreatedMockState({
     experiments: [experiment],
@@ -1209,6 +1514,7 @@ export const submitAbExperimentForDebug = async (
     trafficConfigs: [trafficConfig],
     uniformConfigs: [uniformConfig],
     smoothTasks: smoothTask ? [smoothTask] : [],
+    metricBindingSnapshots: metricSnapshots,
     operationLogs: [operationLog],
   })
 
@@ -1543,11 +1849,594 @@ export const getAbTrafficLayers = () => resolveMock(abTrafficLayers)
 export const getAbMutexDomainGroups = () => resolveMock(abMutexDomainGroups)
 
 export const getAbMetricGroups = (): Promise<MetricGroup[]> => resolveMock(abMetricGroups)
+export const getAbMetricDirectoryGroups = (): Promise<MetricDirectoryGroup[]> => resolveMock(abMetricDirectoryGroups)
 export const getAbMetrics = (): Promise<Metric[]> => resolveMock(abMetrics)
 export const getAbMetricTemplates = () => resolveMock(abMetricTemplates)
+export const getAbMetricPermissionRoleMatrix = (): Promise<MetricPermissionRoleMatrix[]> =>
+  resolveMock(abMetricPermissionRoles)
+export const getAbMetricBindingSnapshots = (experimentId?: EntityId): Promise<MetricBindingSnapshot[]> =>
+  resolveMock(
+    experimentId
+      ? abMetricBindingSnapshots.filter((snapshot) => snapshot.experimentId === experimentId)
+      : abMetricBindingSnapshots,
+  )
 export const getAbAlarmTasks = (): Promise<AlarmTask[]> => resolveMock(abAlarmTasks)
+export const getAbAlarmTriggerRecords = (alarmTaskId?: EntityId): Promise<AlarmTriggerRecord[]> =>
+  resolveMock(
+    alarmTaskId
+      ? abAlarmTriggerRecords.filter((record) => record.alarmTaskId === alarmTaskId)
+      : abAlarmTriggerRecords,
+  )
 export const getAbReceiverGroups = () => resolveMock(abReceiverGroups)
 export const getAbMustSeeMetricTrends = () => resolveMock(abMustSeeMetricTrends)
+
+type AlarmTaskPayload = Pick<
+  AlarmTask,
+  'appId' | 'name' | 'description' | 'alarmType' | 'level' | 'interval' | 'enabled' | 'ruleRelation' | 'scene' | 'strategies' | 'notification'
+>
+type ReceiverGroupPayload = Pick<ReceiverGroup, 'appId' | 'name' | 'memberIds'>
+type MetricDirectoryGroupPayload = Pick<MetricDirectoryGroup, 'appId' | 'name' | 'description'>
+
+function validateMetricDirectoryGroupPayload(payload: MetricDirectoryGroupPayload, directoryId?: EntityId) {
+  const errors: Record<string, string> = {}
+  const name = payload.name.trim()
+  const description = payload.description.trim()
+  if (!name) errors.name = '请输入分组名称'
+  if (name.length > 50) errors.name = '分组名称不能超过 50 个字符'
+  if (description.length > 200) errors.description = '分组描述不能超过 200 个字符'
+  if (
+    abMetricDirectoryGroups.some(
+      (directory) => directory.appId === payload.appId && directory.id !== directoryId && directory.name.trim() === name,
+    )
+  ) {
+    errors.name = '当前应用内已存在同名目录分组'
+  }
+  return errors
+}
+
+export const saveAbMetricDirectoryGroup = (
+  payload: MetricDirectoryGroupPayload & { id?: EntityId },
+): Promise<{ directoryGroup?: MetricDirectoryGroup; message: string; fieldErrors?: Record<string, string> }> => {
+  const fieldErrors = validateMetricDirectoryGroupPayload(payload, payload.id)
+  if (Object.keys(fieldErrors).length) return resolveMock({ message: '请修正目录分组后再保存', fieldErrors }, 120)
+  const existing = payload.id ? abMetricDirectoryGroups.find((directory) => directory.id === payload.id) : undefined
+  const now = nowIso()
+  const directoryGroup: MetricDirectoryGroup = {
+    id: existing?.id ?? createId('dir'),
+    appId: payload.appId,
+    name: payload.name.trim(),
+    description: payload.description.trim(),
+    createdBy: existing?.createdBy ?? currentOperator.id,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+  const index = abMetricDirectoryGroups.findIndex((directory) => directory.id === directoryGroup.id)
+  if (index >= 0) abMetricDirectoryGroups.splice(index, 1, directoryGroup)
+  else abMetricDirectoryGroups.push(directoryGroup)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'METRIC_GROUP',
+    objectId: directoryGroup.id,
+    action: existing ? 'edit_metric_directory_group' : 'create_metric_directory_group',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: existing ? { name: existing.name, description: existing.description } : undefined,
+    after: { name: directoryGroup.name, description: directoryGroup.description },
+    createdAt: now,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ metricDirectoryGroups: [directoryGroup], operationLogs: [operationLog] })
+  return resolveMock({ directoryGroup, message: existing ? '目录分组已保存' : '目录分组已创建' }, 160)
+}
+
+function uniqueReceiverMemberNames(memberIds: EntityId[]) {
+  return [...new Set(memberIds)].map((memberId) => resolveMember(memberId).name)
+}
+
+function syncReceiverGroupUsage() {
+  for (const group of abReceiverGroups) {
+    group.usedByAlarmTaskIds = abAlarmTasks
+      .filter((task) => task.notification.receiverGroupIds.includes(group.id))
+      .map((task) => task.id)
+  }
+}
+
+function validateAlarmTaskPayload(payload: AlarmTaskPayload, taskId?: EntityId) {
+  const errors: Record<string, string> = {}
+  const name = payload.name.trim()
+  if (!name) errors.name = '请输入报警任务名称'
+  if (name.length > 50) errors.name = '报警任务名称不能超过 50 个字符'
+  if (abAlarmTasks.some((task) => task.appId === payload.appId && task.id !== taskId && task.name.trim() === name)) {
+    errors.name = '当前应用内已存在同名报警任务'
+  }
+  if (payload.alarmType === 'experiment' && !payload.scene.experimentId) errors.scene = '实验报警需选择实验'
+  if (payload.alarmType === 'dashboard' && !payload.scene.dashboardId) errors.scene = '大盘报警需填写大盘 ID'
+  if (!payload.strategies.length) errors.strategies = '至少配置一条报警策略'
+  for (const strategy of payload.strategies) {
+    if (!strategy.metricId) errors.strategies = '报警策略需选择指标'
+    if (strategy.thresholdPercent <= 0 || strategy.thresholdPercent > 100) errors.strategies = '阈值需在 0-100 之间'
+  }
+  if (!payload.notification.channels.length) errors.notification = '至少选择一个通知渠道'
+  if (payload.notification.channels.includes('email') && !payload.notification.receiverGroupIds.length) {
+    errors.receiverGroupIds = '选择邮件通知时至少选择一个接收组'
+  }
+  if (!payload.notification.timeRanges.length) errors.notification = '至少配置一个报警时间段'
+  const sortedRanges = [...payload.notification.timeRanges].sort((left, right) => left.start.localeCompare(right.start))
+  for (const [index, range] of sortedRanges.entries()) {
+    if (!range.start || !range.end || range.start >= range.end) errors.notification = '报警时间段开始时间必须早于结束时间'
+    const previousRange = sortedRanges[index - 1]
+    if (previousRange && previousRange.end > range.start) errors.notification = '多个报警时间段不可重叠'
+  }
+  for (const channel of payload.notification.channels) {
+    if (channel !== 'email' && !payload.notification.maskedWebhooks[channel]?.trim()) {
+      errors.notification = '启用机器人通知时需填写 WebHook'
+    }
+    const webhook = channel !== 'email' ? payload.notification.maskedWebhooks[channel]?.trim() : ''
+    if (webhook) {
+      try {
+        const url = new URL(webhook)
+        if (!['http:', 'https:'].includes(url.protocol)) errors.notification = 'WebHook 必须是合法 URL'
+      } catch {
+        errors.notification = 'WebHook 必须是合法 URL'
+      }
+    }
+  }
+  return errors
+}
+
+export const saveAbAlarmTask = (
+  payload: AlarmTaskPayload & { id?: EntityId },
+): Promise<{ task?: AlarmTask; message: string; fieldErrors?: Record<string, string> }> => {
+  const fieldErrors = validateAlarmTaskPayload(payload, payload.id)
+  if (Object.keys(fieldErrors).length) return resolveMock({ message: '请修正报警任务配置后再保存', fieldErrors }, 120)
+  const existing = payload.id ? abAlarmTasks.find((task) => task.id === payload.id) : undefined
+  const createdAt = existing?.createdAt ?? nowIso()
+  const task: AlarmTask = {
+    id: existing?.id ?? createId('alarm'),
+    appId: payload.appId,
+    name: payload.name.trim(),
+    description: payload.description.trim(),
+    alarmType: payload.alarmType,
+    level: payload.level,
+    interval: payload.interval,
+    enabled: payload.enabled,
+    ruleRelation: payload.ruleRelation,
+    scene: payload.alarmType === 'experiment' ? { experimentId: payload.scene.experimentId } : { dashboardId: payload.scene.dashboardId },
+    strategies: payload.strategies.map((strategy) => ({ ...strategy })),
+    notification: {
+      channels: [...new Set(payload.notification.channels)],
+      maskedWebhooks: { ...payload.notification.maskedWebhooks },
+      receiverGroupIds: [...new Set(payload.notification.receiverGroupIds)],
+      timeRanges: payload.notification.timeRanges.length ? payload.notification.timeRanges : [{ start: '00:00', end: '23:59' }],
+    },
+    triggerCount: existing?.triggerCount ?? 0,
+    createdBy: existing?.createdBy ?? currentOperator.id,
+    createdAt,
+  }
+  const index = abAlarmTasks.findIndex((item) => item.id === task.id)
+  if (index >= 0) abAlarmTasks.splice(index, 1, task)
+  else abAlarmTasks.unshift(task)
+  syncReceiverGroupUsage()
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'ALARM_TASK',
+    objectId: task.id,
+    action: existing ? 'edit' : 'create',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    after: { name: task.name, enabled: task.enabled, receiverGroupIds: task.notification.receiverGroupIds },
+    createdAt: nowIso(),
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ alarmTasks: [task], receiverGroups: abReceiverGroups, operationLogs: [operationLog] })
+  return resolveMock({ task, message: existing ? '报警任务已保存' : '报警任务已创建' }, 160)
+}
+
+export const toggleAbAlarmTaskEnabled = (
+  taskId: EntityId,
+  enabled: boolean,
+): Promise<{ task?: AlarmTask; message: string }> => {
+  const task = abAlarmTasks.find((item) => item.id === taskId)
+  if (!task) return resolveMock({ message: '报警任务不存在' }, 120)
+  task.enabled = enabled
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'ALARM_TASK',
+    objectId: task.id,
+    action: enabled ? 'enable' : 'disable',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    after: { enabled },
+    createdAt: nowIso(),
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ alarmTasks: [task], operationLogs: [operationLog] })
+  return resolveMock({ task, message: enabled ? '报警任务已启用' : '报警任务已停用' }, 120)
+}
+
+export const deleteAbAlarmTask = (taskId: EntityId): Promise<{ task?: AlarmTask; message: string }> => {
+  const index = abAlarmTasks.findIndex((task) => task.id === taskId)
+  if (index < 0) return resolveMock({ message: '报警任务不存在' }, 120)
+  const [task] = abAlarmTasks.splice(index, 1)
+  syncReceiverGroupUsage()
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'ALARM_TASK',
+    objectId: task?.id ?? taskId,
+    action: 'delete',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: task ? { name: task.name } : undefined,
+    createdAt: nowIso(),
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ deletedAlarmTaskIds: [taskId], receiverGroups: abReceiverGroups, operationLogs: [operationLog] })
+  return resolveMock({ task, message: '报警任务已删除' }, 160)
+}
+
+function validateReceiverGroupPayload(payload: ReceiverGroupPayload, groupId?: EntityId) {
+  const errors: Record<string, string> = {}
+  const name = payload.name.trim()
+  if (!name) errors.name = '请输入接收组名称'
+  if (name.length > 50) errors.name = '接收组名称不能超过 50 个字符'
+  if (!payload.memberIds.length) errors.memberIds = '至少选择一个成员'
+  if (abReceiverGroups.some((group) => group.appId === payload.appId && group.id !== groupId && group.name.trim() === name)) {
+    errors.name = '当前应用内已存在同名接收组'
+  }
+  return errors
+}
+
+export const saveAbReceiverGroup = (
+  payload: ReceiverGroupPayload & { id?: EntityId },
+): Promise<{ group?: ReceiverGroup; message: string; fieldErrors?: Record<string, string> }> => {
+  const fieldErrors = validateReceiverGroupPayload(payload, payload.id)
+  if (Object.keys(fieldErrors).length) return resolveMock({ message: '请修正接收组配置后再保存', fieldErrors }, 120)
+  const existing = payload.id ? abReceiverGroups.find((group) => group.id === payload.id) : undefined
+  const memberIds = [...new Set(payload.memberIds)]
+  const group: ReceiverGroup = {
+    id: existing?.id ?? createId('rg'),
+    appId: payload.appId,
+    name: payload.name.trim(),
+    memberIds,
+    memberNames: uniqueReceiverMemberNames(memberIds),
+    usedByAlarmTaskIds: existing?.usedByAlarmTaskIds ?? [],
+    createdBy: existing?.createdBy ?? currentOperator.id,
+    updatedAt: nowIso(),
+  }
+  const index = abReceiverGroups.findIndex((item) => item.id === group.id)
+  if (index >= 0) abReceiverGroups.splice(index, 1, group)
+  else abReceiverGroups.unshift(group)
+  syncReceiverGroupUsage()
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'ALARM_TASK',
+    objectId: group.id,
+    action: existing ? 'edit_receiver_group' : 'create_receiver_group',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    after: { name: group.name, memberIds: group.memberIds },
+    createdAt: group.updatedAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ receiverGroups: abReceiverGroups, operationLogs: [operationLog] })
+  return resolveMock({ group, message: existing ? '接收组已保存' : '接收组已创建' }, 160)
+}
+
+export const deleteAbReceiverGroup = (groupId: EntityId): Promise<{ group?: ReceiverGroup; message: string; usedByAlarmTasks?: AlarmTask[] }> => {
+  syncReceiverGroupUsage()
+  const group = abReceiverGroups.find((item) => item.id === groupId)
+  if (!group) return resolveMock({ message: '接收组不存在' }, 120)
+  const usedByAlarmTasks = abAlarmTasks.filter((task) => task.notification.receiverGroupIds.includes(groupId))
+  if (usedByAlarmTasks.length) {
+    return resolveMock({ group, usedByAlarmTasks, message: '当前接收组正在被报警任务使用，不能删除' }, 120)
+  }
+  abReceiverGroups.splice(abReceiverGroups.findIndex((item) => item.id === groupId), 1)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'ALARM_TASK',
+    objectId: group.id,
+    action: 'delete_receiver_group',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: { name: group.name },
+    createdAt: nowIso(),
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ deletedReceiverGroupIds: [groupId], operationLogs: [operationLog] })
+  return resolveMock({ group, message: '接收组已删除' }, 160)
+}
+
+type MetricTemplatePayload = Pick<
+  MetricTemplate,
+  'appId' | 'name' | 'description' | 'ownerId' | 'templateType' | 'availableUserIds' | 'metricGroupIds'
+>
+
+function validateMetricTemplatePayload(payload: MetricTemplatePayload, templateId?: EntityId) {
+  const errors: Record<string, string> = {}
+  const name = payload.name.trim()
+  if (!name) errors.name = '请输入模板名称'
+  if (name.length > 50) errors.name = '模板名称不能超过 50 个字符'
+  if (!payload.ownerId) errors.ownerId = '请选择 Owner'
+  if (!payload.metricGroupIds.length) errors.metricGroupIds = '至少选择一个指标组'
+  if (
+    abMetricTemplates.some(
+      (template) => template.appId === payload.appId && template.id !== templateId && template.name.trim() === name,
+    )
+  ) {
+    errors.name = '当前应用内已存在同名模板'
+  }
+  return errors
+}
+
+export const createAbMetricTemplate = (
+  payload: MetricTemplatePayload,
+): Promise<{ template?: MetricTemplate; message: string; fieldErrors?: Record<string, string> }> => {
+  const fieldErrors = validateMetricTemplatePayload(payload)
+  if (Object.keys(fieldErrors).length) return resolveMock({ message: '请修正模板配置后再保存', fieldErrors }, 120)
+  const createdAt = nowIso()
+  const template: MetricTemplate = {
+    id: createId('tpl_metric'),
+    appId: payload.appId,
+    name: payload.name.trim(),
+    description: payload.description.trim(),
+    ownerId: payload.ownerId,
+    templateType: payload.templateType,
+    availableUserIds: payload.templateType === 'common' ? [] : [...new Set(payload.availableUserIds)],
+    metricGroupIds: [...new Set(payload.metricGroupIds)],
+    createdAt,
+    updatedAt: createdAt,
+  }
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'METRIC_TEMPLATE',
+    objectId: template.id,
+    action: 'create',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    after: { name: template.name, metricGroupIds: template.metricGroupIds },
+    createdAt,
+  }
+  abMetricTemplates.unshift(template)
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ metricTemplates: [template], operationLogs: [operationLog] })
+  return resolveMock({ template, message: '指标模板已创建' }, 160)
+}
+
+export const updateAbMetricTemplate = (
+  templateId: EntityId,
+  payload: MetricTemplatePayload,
+): Promise<{ template?: MetricTemplate; message: string; fieldErrors?: Record<string, string> }> => {
+  const template = abMetricTemplates.find((item) => item.id === templateId)
+  if (!template) return resolveMock({ message: '指标模板不存在' }, 120)
+  const fieldErrors = validateMetricTemplatePayload(payload, templateId)
+  if (Object.keys(fieldErrors).length) return resolveMock({ template, message: '请修正模板配置后再保存', fieldErrors }, 120)
+  const before = { name: template.name, metricGroupIds: template.metricGroupIds }
+  template.appId = payload.appId
+  template.name = payload.name.trim()
+  template.description = payload.description.trim()
+  template.ownerId = payload.ownerId
+  template.templateType = payload.templateType
+  template.availableUserIds = payload.templateType === 'common' ? [] : [...new Set(payload.availableUserIds)]
+  template.metricGroupIds = [...new Set(payload.metricGroupIds)]
+  template.updatedAt = nowIso()
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'METRIC_TEMPLATE',
+    objectId: template.id,
+    action: 'edit',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before,
+    after: { name: template.name, metricGroupIds: template.metricGroupIds },
+    createdAt: template.updatedAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ metricTemplates: [template], operationLogs: [operationLog] })
+  return resolveMock({ template, message: '指标模板已保存' }, 160)
+}
+
+export const deleteAbMetricTemplate = (templateId: EntityId): Promise<{ template?: MetricTemplate; message: string }> => {
+  const index = abMetricTemplates.findIndex((item) => item.id === templateId)
+  if (index < 0) return resolveMock({ message: '指标模板不存在' }, 120)
+  const [template] = abMetricTemplates.splice(index, 1)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'METRIC_TEMPLATE',
+    objectId: template?.id ?? templateId,
+    action: 'delete',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: template ? { name: template.name, metricGroupIds: template.metricGroupIds } : undefined,
+    createdAt: nowIso(),
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ deletedMetricTemplateIds: [templateId], operationLogs: [operationLog] })
+  return resolveMock({ template, message: '指标模板已删除' }, 160)
+}
+
+const metricOperatorsNeedProperty = new Set(['sum/au', 'sum/uv', 'sum/pv', 'sum', 'count_distinct'])
+
+function cloneMetricDefinition(definition: Metric['definition'], metricId: EntityId): Metric['definition'] {
+  const nextDefinition = JSON.parse(JSON.stringify(definition)) as Metric['definition']
+  nextDefinition.metricId = metricId
+  return nextDefinition
+}
+
+function createUniqueMetricGroupName(baseName: string, appId: EntityId, excludedGroupId?: EntityId) {
+  const normalizedBase = baseName.trim()
+  const existingNames = new Set(
+    abMetricGroups
+      .filter((group) => group.appId === appId && group.id !== excludedGroupId)
+      .map((group) => group.name.trim().toLowerCase()),
+  )
+  if (!existingNames.has(normalizedBase.toLowerCase())) return normalizedBase
+  let index = 2
+  while (existingNames.has(`${normalizedBase}${index}`.toLowerCase())) index += 1
+  return `${normalizedBase}${index}`
+}
+
+function validateMetricDefinition(metric: Metric, groupType: MetricGroup['type']) {
+  const errors: string[] = []
+  if (!metric.name.trim()) errors.push('指标名称不能为空')
+  if (metric.name.trim().length > 50) errors.push(`${metric.name} 名称不能超过 50 个字符`)
+  if (metric.metricCategory !== groupType) errors.push(`${metric.name} 类型需与指标组类型一致`)
+  if (metric.numberFormat.decimalPlaces < 0 || metric.numberFormat.decimalPlaces > 6) {
+    errors.push(`${metric.name} 小数位需在 0-6 之间`)
+  }
+  if (groupType === 'event' && 'events' in metric.definition) {
+    const events = metric.definition.events
+    if (!events.length) errors.push(`${metric.name} 至少配置一个事件口径`)
+    if (events.length > 26) errors.push(`${metric.name} 组合事件最多支持 A-Z 26 个`)
+    if (metric.metricKind === 'composite' && events.length < 2) {
+      errors.push(`${metric.name} 组合指标至少包含 2 个事件`)
+    }
+    for (const event of events) {
+      if (!event.eventId) errors.push(`${metric.name} 的事件 ${event.code} 未选择事件`)
+      if (!event.operator) errors.push(`${metric.name} 的事件 ${event.code} 未选择计算方式`)
+      if (metricOperatorsNeedProperty.has(event.operator) && !event.propertyId) {
+        errors.push(`${metric.name} 的事件 ${event.code} 需要选择属性`)
+      }
+      if (event.aggregationFilter?.enabled && event.aggregationFilter.dimensionType !== 'user' && !event.aggregationFilter.propertyId) {
+        errors.push(`${metric.name} 的事件 ${event.code} 聚合过滤需选择聚合属性`)
+      }
+      for (const filter of event.filters) {
+        if (!filter.propertyId || !filter.operator) errors.push(`${metric.name} 的过滤条件不完整`)
+        if (!['is_null', 'is_not_null', '有值', '无值'].includes(filter.operator) && filter.value === '') {
+          errors.push(`${metric.name} 的过滤条件缺少属性值`)
+        }
+      }
+    }
+    if (metric.metricKind === 'composite') {
+      const formulaResult = validateMetricFormula(metric.definition.formula ?? '', events.map((event) => event.code))
+      if (!formulaResult.valid) errors.push(`${metric.name}：${formulaResult.message}`)
+    }
+  }
+  if (groupType === 'retention' && 'startEvent' in metric.definition) {
+    if (!metric.definition.startEvent.eventId) errors.push(`${metric.name} 未选择起始事件`)
+    if (!metric.definition.returnEvent.eventId) errors.push(`${metric.name} 未选择回访事件`)
+    if (!Number.isInteger(metric.definition.retentionDays) || metric.definition.retentionDays < 1 || metric.definition.retentionDays > 365) {
+      errors.push(`${metric.name} 留存天数需为 1-365 的整数`)
+    }
+  }
+  if (groupType === 'funnel' && 'steps' in metric.definition) {
+    if (metric.definition.steps.length < 2 || metric.definition.steps.length > 10) {
+      errors.push(`${metric.name} 漏斗步骤需为 2-10 个`)
+    }
+    if (!metric.definition.conversionWindow.value || metric.definition.conversionWindow.value <= 0) {
+      errors.push(`${metric.name} 转化窗口期必须为正整数`)
+    }
+  }
+  return errors
+}
+
+function validateMetricGroupEditorPayload(payload: MetricGroupEditorPayload) {
+  const fieldErrors: Record<string, string> = {}
+  const name = payload.name.trim()
+  if (!name) fieldErrors.name = '请输入指标组名称'
+  if (name.length > 50) fieldErrors.name = '指标组名称不能超过 50 个字符'
+  if (!payload.ownerId) fieldErrors.ownerId = '请选择 Owner'
+  if (abMetricGroups.some((group) => group.appId === payload.appId && group.id !== payload.groupId && group.name.trim() === name)) {
+    fieldErrors.name = '当前应用内已存在同名指标组'
+  }
+  if (!payload.metrics.length) fieldErrors.metrics = '指标配置至少包含 1 个指标'
+  if (payload.type === 'event' && payload.metrics.length > 100) fieldErrors.metrics = '事件指标组最多保存 100 个指标'
+  if (payload.type === 'retention' && payload.metrics.length > 1) fieldErrors.metrics = '留存指标组只能保存 1 个指标'
+  if (payload.type === 'funnel' && payload.metrics.length > 1) fieldErrors.metrics = '漏斗指标组只能保存 1 个指标'
+
+  const metricNames = payload.metrics.map((metric) => metric.name.trim()).filter(Boolean)
+  if (new Set(metricNames).size !== metricNames.length) fieldErrors.metricNames = '当前指标组内存在重复指标名称'
+
+  const definitionErrors = payload.metrics.flatMap((metric) => validateMetricDefinition(metric, payload.type))
+  if (definitionErrors.length) fieldErrors.metricDefinitions = definitionErrors.slice(0, 4).join('；')
+  return fieldErrors
+}
+
+export const saveAbMetricGroup = (
+  payload: MetricGroupEditorPayload,
+): Promise<{ group?: MetricGroup; metrics?: Metric[]; message: string; fieldErrors?: Record<string, string> }> => {
+  const fieldErrors = validateMetricGroupEditorPayload(payload)
+  if (Object.keys(fieldErrors).length) {
+    return resolveMock({ message: '请修正指标组配置后再保存', fieldErrors }, 120)
+  }
+
+  const existingGroup = payload.mode === 'edit' && payload.groupId
+    ? abMetricGroups.find((group) => group.id === payload.groupId)
+    : undefined
+  if (payload.mode === 'edit' && !existingGroup) {
+    return resolveMock({ message: '指标组不存在' }, 120)
+  }
+  if (existingGroup?.status === 'offline') {
+    return resolveMock({ group: existingGroup, message: '已下线指标组不可编辑' }, 120)
+  }
+
+  const createdAt = nowIso()
+  const groupId = existingGroup?.id ?? createId(payload.mode === 'copy' ? 'mg_copy' : 'mg')
+  const normalizedMetrics = payload.metrics.map((metric) => {
+    const canReuseMetricId =
+      payload.mode === 'edit' &&
+      Boolean(metric.id) &&
+      !metric.id.startsWith('draft_') &&
+      abMetrics.some((item) => item.id === metric.id && item.metricGroupId === groupId)
+    const metricId = canReuseMetricId ? metric.id : createId('metric')
+    const previousMetric = abMetrics.find((item) => item.id === metric.id)
+    return {
+      ...metric,
+      id: metricId,
+      metricGroupId: groupId,
+      metricCategory: payload.type,
+      name: metric.name.trim(),
+      description: metric.description.trim(),
+      definition: cloneMetricDefinition(metric.definition, metricId),
+      status: 'active' as const,
+      createdAt: canReuseMetricId ? (previousMetric?.createdAt ?? createdAt) : createdAt,
+      updatedAt: createdAt,
+    }
+  })
+  const group: MetricGroup = {
+    id: groupId,
+    appId: payload.appId,
+    name: payload.name.trim(),
+    description: payload.description.trim(),
+    type: payload.type,
+    status: existingGroup?.status ?? 'active',
+    ownerId: payload.ownerId,
+    owner: resolveMember(payload.ownerId),
+    creatorId: existingGroup?.creatorId ?? currentOperator.id,
+    permissionType: payload.permissionType,
+    authorizedUserIds: payload.permissionType === 'private' ? [...new Set(payload.authorizedUserIds)] : [],
+    directoryGroupId: payload.directoryGroupId,
+    metricIds: normalizedMetrics.map((metric) => metric.id),
+    relatedExperimentIds: existingGroup?.relatedExperimentIds ?? [],
+    createdAt: existingGroup?.createdAt ?? createdAt,
+    updatedAt: createdAt,
+  }
+  const groupIndex = abMetricGroups.findIndex((item) => item.id === group.id)
+  if (groupIndex >= 0) abMetricGroups.splice(groupIndex, 1, group)
+  else abMetricGroups.unshift(group)
+
+  for (let index = abMetrics.length - 1; index >= 0; index -= 1) {
+    const metric = abMetrics[index]
+    if (metric && metric.metricGroupId === group.id && !normalizedMetrics.some((item) => item.id === metric.id)) {
+      abMetrics.splice(index, 1)
+    }
+  }
+  mergeById(abMetrics, normalizedMetrics)
+
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'METRIC_GROUP',
+    objectId: group.id,
+    action: payload.mode === 'edit' ? 'edit' : payload.mode === 'copy' ? 'copy_save' : 'create',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: existingGroup ? { groupId: existingGroup.id, metricIds: existingGroup.metricIds } : undefined,
+    after: { name: group.name, type: group.type, metricIds: group.metricIds },
+    createdAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ metricGroups: [group], metrics: normalizedMetrics, operationLogs: [operationLog] })
+  return resolveMock({ group, metrics: normalizedMetrics, message: '指标组已保存' }, 180)
+}
 
 export const createAbMetricGroup = (payload: {
   appId: EntityId
@@ -1595,13 +2484,30 @@ export const copyAbMetricGroup = (groupId: EntityId): Promise<{ group?: MetricGr
   const source = abMetricGroups.find((group) => group.id === groupId)
   if (!source) return resolveMock({ message: '指标组不存在' })
   const createdAt = nowIso()
+  const nextGroupId = createId('mg_copy')
+  const copiedMetrics = source.metricIds
+    .map((metricId) => abMetrics.find((metric) => metric.id === metricId))
+    .filter((metric): metric is Metric => Boolean(metric))
+    .map((metric) => {
+      const metricId = createId('metric_copy')
+      return {
+        ...metric,
+        id: metricId,
+        metricGroupId: nextGroupId,
+        definition: cloneMetricDefinition(metric.definition, metricId),
+        isMustSee: false,
+        createdAt,
+        updatedAt: createdAt,
+      }
+    })
   const group: MetricGroup = {
     ...source,
-    id: createId('mg_copy'),
-    name: `${source.name} 副本`,
+    id: nextGroupId,
+    name: createUniqueMetricGroupName(`${source.name}-复制`, source.appId),
     ownerId: currentOperator.id,
     owner: currentOperator,
     creatorId: currentOperator.id,
+    metricIds: copiedMetrics.map((metric) => metric.id),
     relatedExperimentIds: [],
     createdAt,
     updatedAt: createdAt,
@@ -1618,31 +2524,80 @@ export const copyAbMetricGroup = (groupId: EntityId): Promise<{ group?: MetricGr
     createdAt,
   }
   abMetricGroups.unshift(group)
+  abMetrics.unshift(...copiedMetrics)
   abOperationLogs.unshift(operationLog)
-  persistCreatedMockState({ metricGroups: [group], operationLogs: [operationLog] })
+  persistCreatedMockState({ metricGroups: [group], metrics: copiedMetrics, operationLogs: [operationLog] })
   return resolveMock({ group, message: '指标组已复制' })
 }
 
 export const mergeAbMetricGroups = (
   groupIds: EntityId[],
-): Promise<{ group?: MetricGroup; message: string }> => {
+  options: {
+    name?: string
+    description?: string
+    ownerId?: EntityId
+    permissionType?: MetricGroup['permissionType']
+    authorizedUserIds?: EntityId[]
+    metricNameOverrides?: Record<EntityId, string>
+  } = {},
+): Promise<{ group?: MetricGroup; message: string; fieldErrors?: Record<string, string> }> => {
   const sources = abMetricGroups.filter((group) => groupIds.includes(group.id))
   if (sources.length < 2) return resolveMock({ message: '请至少选择两个指标组合并' })
+  if (sources.some((group) => group.status !== 'active')) return resolveMock({ message: '仅使用中的指标组支持合并' })
+  if (new Set(sources.map((group) => group.type)).size > 1) return resolveMock({ message: '请选择同一种指标类型的指标组合并' })
+  if (sources[0]?.type !== 'event') {
+    return resolveMock({ message: '留存指标组和漏斗指标组每组仅允许一个指标，不支持合并' })
+  }
+  const sourceMetrics = sources
+    .flatMap((group) => group.metricIds)
+    .map((metricId) => abMetrics.find((metric) => metric.id === metricId))
+    .filter((metric): metric is Metric => Boolean(metric))
+  const fieldErrors: Record<string, string> = {}
+  const groupName = (options.name ?? '').trim()
+  if (!groupName) fieldErrors.name = '请输入新指标组名称'
+  if (groupName.length > 50) fieldErrors.name = '新指标组名称不能超过 50 个字符'
+  if (groupName && abMetricGroups.some((group) => group.appId === sources[0]?.appId && group.name.trim() === groupName)) {
+    fieldErrors.name = '当前应用内已存在同名指标组'
+  }
+  if (!options.ownerId) fieldErrors.ownerId = '请选择 Owner'
+  const nextMetricNames = sourceMetrics.map((metric) => (options.metricNameOverrides?.[metric.id] ?? metric.name).trim())
+  if (nextMetricNames.some((name) => !name)) fieldErrors.metricNames = '指标名称不能为空'
+  if (nextMetricNames.some((name) => name.length > 50)) fieldErrors.metricNames = '指标名称不能超过 50 个字符'
+  if (new Set(nextMetricNames).size !== nextMetricNames.length) {
+    fieldErrors.metricNames = '指标名称重复，请修改后再合并'
+  }
+  if (Object.keys(fieldErrors).length) {
+    return resolveMock({ message: '请修正合并配置后再保存', fieldErrors })
+  }
   const createdAt = nowIso()
-  const metricIds = [...new Set(sources.flatMap((group) => group.metricIds))]
+  const nextGroupId = createId('mg_merge')
+  const copiedMetrics = sourceMetrics.map((metric) => {
+    const metricId = createId('metric_merge')
+    return {
+      ...metric,
+      id: metricId,
+      metricGroupId: nextGroupId,
+      name: (options.metricNameOverrides?.[metric.id] ?? metric.name).trim(),
+      definition: cloneMetricDefinition(metric.definition, metricId),
+      isMustSee: false,
+      createdAt,
+      updatedAt: createdAt,
+    }
+  })
+  const metricIds = copiedMetrics.map((metric) => metric.id)
   const relatedExperimentIds = [...new Set(sources.flatMap((group) => group.relatedExperimentIds))]
   const group: MetricGroup = {
-    id: createId('mg_merge'),
+    id: nextGroupId,
     appId: sources[0]?.appId ?? 'app_news',
-    name: `${sources.map((item) => item.name).join(' + ')} 合并组`,
-    description: '由多个指标组合并生成，保留原指标口径快照。',
+    name: groupName,
+    description: (options.description ?? '').trim(),
     type: sources[0]?.type ?? 'event',
     status: 'active',
-    ownerId: currentOperator.id,
-    owner: currentOperator,
+    ownerId: options.ownerId ?? currentOperator.id,
+    owner: resolveMember(options.ownerId),
     creatorId: currentOperator.id,
-    permissionType: sources.some((item) => item.permissionType === 'private') ? 'private' : 'public',
-    authorizedUserIds: [...new Set(sources.flatMap((group) => group.authorizedUserIds))],
+    permissionType: options.permissionType ?? 'public',
+    authorizedUserIds: options.permissionType === 'private' ? [...new Set(options.authorizedUserIds ?? [])] : [],
     metricIds,
     relatedExperimentIds,
     createdAt,
@@ -1656,18 +2611,31 @@ export const mergeAbMetricGroups = (
     operatorId: currentOperator.id,
     operatorName: currentOperator.name,
     before: { sourceGroupIds: groupIds },
-    after: { metricIds },
+    after: { name: group.name, metricIds },
     createdAt,
   }
   abMetricGroups.unshift(group)
+  abMetrics.unshift(...copiedMetrics)
   abOperationLogs.unshift(operationLog)
-  persistCreatedMockState({ metricGroups: [group], operationLogs: [operationLog] })
+  persistCreatedMockState({ metricGroups: [group], metrics: copiedMetrics, operationLogs: [operationLog] })
   return resolveMock({ group, message: '指标组已合并' })
 }
 
-export const offlineAbMetricGroup = (groupId: EntityId): Promise<{ group?: MetricGroup; message: string }> => {
+export const offlineAbMetricGroup = (
+  groupId: EntityId,
+): Promise<{ group?: MetricGroup; message: string; relatedExperiments?: Experiment[] }> => {
   const group = abMetricGroups.find((item) => item.id === groupId)
   if (!group) return resolveMock({ message: '指标组不存在' })
+  const runningExperiments = group.relatedExperimentIds
+    .map((experimentId) => findExperiment(experimentId))
+    .filter((experiment): experiment is Experiment => experiment?.status === 'RUNNING')
+  if (runningExperiments.length) {
+    return resolveMock({
+      group,
+      relatedExperiments: runningExperiments,
+      message: '当前指标组存在被运行中实验使用的指标，请先停止相关实验或移除指标后再下线。',
+    })
+  }
   const before = { status: group.status }
   group.status = 'offline'
   group.updatedAt = nowIso()
@@ -1715,12 +2683,92 @@ export const toggleAbMetricMustSee = (
 export const getAbReportOverview = (experimentId: EntityId): Promise<ExperimentReportOverview | undefined> =>
   resolveMock(abReportOverviews.find((overview) => overview.experimentId === experimentId))
 
-export const queryAbMetricResults = (_experimentId: EntityId, _filter?: Partial<ReportFilter>) =>
-  resolveMock({
-    metrics: abMetricResults,
-    trends: abTrendPoints,
-    templates: abFilterTemplates,
+const synthesizeMetricResults = (experimentId: EntityId): MetricStatisticResult[] => {
+  const experiment = findExperiment(experimentId)
+  if (!experiment) return []
+  if (experiment.type === 'MAB') {
+    const mabReport = abMabReports.find((report) => report.experimentId === experimentId)
+    if (!mabReport) return []
+    const baselineArm = mabReport.arms[0]
+    if (!baselineArm) return []
+    return [
+      {
+        metricId: experiment.metricIds[0] ?? 'metric_banner_ctr',
+        metricName: mabReport.optimizationMetric,
+        metricType: 'event',
+        versionResults: mabReport.arms.map((arm, index) => ({
+          versionId: arm.armId,
+          sampleSize: arm.entryUsers,
+          metricValue: arm.metricValue,
+          diffAbs: index === 0 ? null : arm.metricValue - baselineArm.metricValue,
+          diffRel: index === 0 ? null : (arm.metricValue - baselineArm.metricValue) / baselineArm.metricValue,
+          pValue: index === 0 ? null : Math.max(0.006, 0.12 - arm.p2ba * 0.1),
+          mde: index === 0 ? null : 0.018,
+          confidenceInterval: index === 0 ? null : [arm.distribution[0] - baselineArm.metricValue, arm.distribution[2] - baselineArm.metricValue],
+          significance: index === 0 ? 'baseline' : arm.p2ba >= 0.6 ? 'positive' : 'neutral',
+        })),
+      },
+    ]
+  }
+  return []
+}
+
+export const queryAbMetricResults = (experimentId: EntityId, filter?: Partial<ReportFilter>) => {
+  const experiment = findExperiment(experimentId)
+  const experimentMetricIds = new Set(experiment?.metricIds ?? [])
+  const baseMetrics = abMetricResults.filter((metric) => !experimentMetricIds.size || experimentMetricIds.has(metric.metricId))
+  const metrics = (baseMetrics.length ? baseMetrics : synthesizeMetricResults(experimentId)).map((metric) => {
+    const filterCount = filter?.filters?.length ?? 0
+    const cohortCount = filter?.cohorts?.length ?? 0
+    const segmentFactor = Math.max(0.18, 1 - filterCount * 0.08 - cohortCount * 0.12)
+    const modeFactor = filter?.dataMode === 'pre_aa' ? 0.96 : 1
+    const granularityFactor = filter?.timeGranularity === 'hour' ? 0.78 : filter?.timeGranularity === '5m' ? 0.42 : 1
+    return {
+      ...metric,
+      versionResults: metric.versionResults.map((result, index) => {
+        const sampleSize = Math.max(120, Math.round(result.sampleSize * segmentFactor * granularityFactor))
+        const valueFactor = modeFactor * (1 + (index === 0 ? -0.003 : 0.004) * filterCount)
+        return {
+          ...result,
+          sampleSize,
+          metricValue: result.metricValue === null ? null : result.metricValue * valueFactor,
+          diffAbs: result.diffAbs === null ? null : result.diffAbs * modeFactor,
+          diffRel: result.diffRel === null ? null : result.diffRel * modeFactor,
+          pValue: result.pValue === null ? null : Math.min(0.99, result.pValue + filterCount * 0.006 + cohortCount * 0.01),
+        }
+      }),
+    }
   })
+  const versionIds = new Set(metrics.flatMap((metric) => metric.versionResults.map((result) => result.versionId)))
+  const baseTrends = abTrendPoints.filter((point) => versionIds.has(point.versionId))
+  const trends = (baseTrends.length
+    ? baseTrends
+    : metrics.flatMap((metric) =>
+        metric.versionResults.flatMap((result) =>
+          Array.from({ length: 7 }, (_, index) => ({
+            time: `2026-05-${String(22 + index).padStart(2, '0')}`,
+            versionId: result.versionId,
+            value: Math.max(0, (result.metricValue ?? 0.1) * (0.92 + index * 0.015)),
+            lowerBound: Math.max(0, (result.metricValue ?? 0.1) * 0.86),
+            upperBound: (result.metricValue ?? 0.1) * 1.08,
+            pValue: result.pValue ?? undefined,
+          })),
+        ),
+      )).map((point, index) => ({
+    ...point,
+    time:
+      filter?.timeGranularity === 'hour'
+        ? `${point.time} ${String(index % 24).padStart(2, '0')}:00`
+        : filter?.timeGranularity === '5m'
+          ? `${point.time} ${String(index % 24).padStart(2, '0')}:${String((index % 12) * 5).padStart(2, '0')}`
+          : point.time,
+  }))
+  return resolveMock({
+    metrics,
+    trends,
+    templates: abFilterTemplates.filter((template) => !experiment || template.appId === experiment.appId),
+  })
+}
 
 export const getAbFunnelReport = (metricId: EntityId) =>
   resolveMock(abFunnelReports.find((report) => report.metricId === metricId))
@@ -1728,7 +2776,82 @@ export const getAbFunnelReport = (metricId: EntityId) =>
 export const getAbCohortReport = (metricId: EntityId) =>
   resolveMock(abCohortReports.find((report) => report.metricId === metricId))
 
-export const getAbHeatmapReport = () => resolveMock(abHeatmapReports[0])
+function countMetricFilterTree(group: TemporaryRetentionQueryPayload['startFilterTree']): number {
+  return group.conditions.length + group.groups.reduce((total, child) => total + countMetricFilterTree(child), 0)
+}
+
+export const queryAbTemporaryRetention = (
+  payload: TemporaryRetentionQueryPayload,
+): Promise<{ result?: TemporaryRetentionQueryResult; message: string; fieldErrors?: Record<string, string> }> => {
+  const fieldErrors: Record<string, string> = {}
+  const experiment = findExperiment(payload.experimentId)
+  if (!experiment) fieldErrors.experimentId = '实验不存在'
+  if (!payload.startEventId) fieldErrors.startEventId = '请选择起始事件'
+  if (!payload.returnEventId) fieldErrors.returnEventId = '请选择回访事件'
+  if (!payload.startDate || !payload.endDate || payload.startDate > payload.endDate) {
+    fieldErrors.dateRange = '请选择合法的查询日期范围'
+  }
+  if (Object.keys(fieldErrors).length) return resolveMock({ message: '请修正临时留存查询条件', fieldErrors }, 120)
+
+  const metricId = payload.metricId || experiment?.metricIds.find((id) => abMetrics.find((metric) => metric.id === id)?.metricCategory === 'retention')
+  const baseReport =
+    (metricId ? abCohortReports.find((report) => report.metricId === metricId) : undefined) ??
+    abCohortReports.find((report) => report.metricId === 'metric_retention_d1')
+  if (!baseReport) return resolveMock({ message: '暂无可用于临时留存查询的同期群数据' }, 120)
+
+  const startFilterCount = countMetricFilterTree(payload.startFilterTree)
+  const returnFilterCount = countMetricFilterTree(payload.returnFilterTree)
+  const filterFactor = Math.max(0.4, 1 - startFilterCount * 0.05 - returnFilterCount * 0.06)
+  const result: TemporaryRetentionQueryResult = {
+    id: createId('temp_retention'),
+    experimentId: payload.experimentId,
+    metricId: baseReport.metricId,
+    sourceMetricId: payload.metricId ?? null,
+    startEventId: payload.startEventId,
+    returnEventId: payload.returnEventId,
+    startFilterTree: JSON.parse(JSON.stringify(payload.startFilterTree)) as TemporaryRetentionQueryPayload['startFilterTree'],
+    returnFilterTree: JSON.parse(JSON.stringify(payload.returnFilterTree)) as TemporaryRetentionQueryPayload['returnFilterTree'],
+    retentionDays: baseReport.retentionDays,
+    rows: baseReport.rows.map((row) => ({
+      ...row,
+      newUsers: Math.max(1, Math.round(row.newUsers * filterFactor)),
+      values: row.values.map((value, index) => (index === 0 ? value : Math.max(0, Number((value * (1 - (startFilterCount + returnFilterCount) * 0.006)).toFixed(4))))),
+    })),
+    queriedAt: nowIso(),
+    summary: {
+      startFilterCount,
+      returnFilterCount,
+      versionCount: new Set(baseReport.rows.map((row) => row.versionId)).size,
+      cohortCount: baseReport.rows.length,
+    },
+  }
+  abTemporaryRetentionQueryResults.unshift(result)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'EXPERIMENT',
+    objectId: payload.experimentId,
+    action: 'query_temporary_retention',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    after: {
+      metricId: payload.metricId,
+      startEventId: payload.startEventId,
+      returnEventId: payload.returnEventId,
+      startFilterCount,
+      returnFilterCount,
+    },
+    createdAt: result.queriedAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ temporaryRetentionQueries: [result], operationLogs: [operationLog] })
+  return resolveMock({ result, message: '临时留存查询完成，口径已写入本次报告查询记录' }, 240)
+}
+
+export const getAbHeatmapReport = (experimentId?: EntityId) => {
+  const experiment = experimentId ? findExperiment(experimentId) : undefined
+  if (experiment && experiment.type !== 'VISUAL' && experiment.type !== 'SPLIT_URL') return resolveMock(undefined)
+  return resolveMock(abHeatmapReports[0])
+}
 export const getAbMabReport = (experimentId: EntityId) =>
   resolveMock(abMabReports.find((report) => report.experimentId === experimentId))
 export const getAbSensitiveInsightTasks = (experimentId?: EntityId) =>
@@ -1840,20 +2963,230 @@ export const retryAbReportExportTask = (
   return resolveMock({ task, message: '导出任务已重新入队' }, 160)
 }
 
-export const getAbFeatureFlags = () => resolveMock(abFeatureFlags)
-export const getAbFeatureVersions = (featureId?: EntityId) =>
-  resolveMock(featureId ? abFeatureVersions.filter((version) => version.featureId === featureId) : abFeatureVersions)
-export const getAbPublishPlans = () => resolveMock(abPublishPlans)
-export const getAbWhitelistTests = () => resolveMock(abWhitelistTests)
+function getLatestFullVersion(featureId: EntityId, excludingVersionId?: EntityId) {
+  return [...abFeatureVersions]
+    .filter(
+      (version) =>
+        version.featureId === featureId &&
+        version.versionId !== excludingVersionId &&
+        version.versionStatus === 'full',
+    )
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+}
+
+function applyDuePublishPlans() {
+  const changedFeatures: FeatureFlag[] = []
+  const changedVersions: FeatureVersion[] = []
+  const changedPlans: PublishPlan[] = []
+  const operationLogs: OperationLog[] = []
+  const now = Date.now()
+
+  for (const plan of abPublishPlans) {
+    if (plan.status === 'canceled' || plan.status === 'rolled_back' || plan.status === 'failed') continue
+    const feature = findFeature(plan.featureId)
+    const version = findFeatureVersion(plan.versionId)
+    if (!feature || !version) {
+      const failedAt = nowIso()
+      const nextPlan: PublishPlan = { ...plan, status: 'failed' }
+      abPublishPlans.splice(abPublishPlans.findIndex((item) => item.publishId === nextPlan.publishId), 1, nextPlan)
+      const operationLog: OperationLog = {
+        id: createId('log'),
+        objectType: 'FEATURE_VERSION',
+        objectId: plan.versionId,
+        action: 'schedule_feature_publish_failed',
+        operatorId: 'system_scheduler',
+        operatorName: '系统调度',
+        before: { plan },
+        after: { status: 'failed', failureReason: 'Feature 或版本不存在', notifyOwners: feature?.owners ?? [], plan: nextPlan },
+        createdAt: failedAt,
+      }
+      abOperationLogs.unshift(operationLog)
+      changedPlans.push(nextPlan)
+      operationLogs.push(operationLog)
+      continue
+    }
+
+    const rollbackDue = plan.rollbackAt ? new Date(plan.rollbackAt).getTime() <= now : false
+    if (rollbackDue) {
+      const createdAt = nowIso()
+      const fallbackVersion = getLatestFullVersion(plan.featureId, plan.versionId)
+      const nextVersion: FeatureVersion = { ...version, versionStatus: 'rolled_back', publishTraffic: 0 }
+      const nextFeature: FeatureFlag = {
+        ...feature,
+        status: fallbackVersion ? 'enabled' : 'disabled',
+        publishStatus: fallbackVersion ? 'full' : 'disabled',
+        currentVersionId: fallbackVersion?.versionId ?? feature.currentVersionId,
+        updatedAt: createdAt,
+      }
+      const nextPlan: PublishPlan = { ...plan, status: 'rolled_back' }
+      abFeatureVersions.splice(abFeatureVersions.findIndex((item) => item.versionId === nextVersion.versionId), 1, nextVersion)
+      abFeatureFlags.splice(abFeatureFlags.findIndex((item) => item.featureId === nextFeature.featureId), 1, nextFeature)
+      abPublishPlans.splice(abPublishPlans.findIndex((item) => item.publishId === nextPlan.publishId), 1, nextPlan)
+      const operationLog: OperationLog = {
+        id: createId('log'),
+        objectType: 'FEATURE',
+        objectId: feature.featureId,
+        action: fallbackVersion ? 'rollback_feature' : 'rollback_feature_close',
+        operatorId: 'system_scheduler',
+        operatorName: '系统调度',
+        before: { currentVersionId: feature.currentVersionId, publishStatus: feature.publishStatus, plan },
+        after: { currentVersionId: nextFeature.currentVersionId, publishStatus: nextFeature.publishStatus, plan: nextPlan },
+        createdAt,
+      }
+      abOperationLogs.unshift(operationLog)
+      changedFeatures.push(nextFeature)
+      changedVersions.push(nextVersion)
+      changedPlans.push(nextPlan)
+      operationLogs.push(operationLog)
+      continue
+    }
+
+    if (plan.publishType !== 'scheduled' || plan.status === 'completed') continue
+    const orderedSteps = [...plan.steps].sort((left, right) => left.stepNo - right.stepNo)
+    const dueSteps = orderedSteps.filter((step) => new Date(step.publishTime).getTime() <= now)
+    const dueTraffic = dueSteps.at(-1)?.traffic
+    if (!dueTraffic) continue
+    const targetTraffic = orderedSteps.at(-1)?.traffic ?? dueTraffic
+    const nextPublishStatus = dueTraffic >= 100 ? 'full' : 'gray'
+    const nextPlanStatus = dueTraffic >= targetTraffic ? 'completed' : 'running'
+    if (
+      feature.currentVersionId === version.versionId &&
+      feature.publishStatus === nextPublishStatus &&
+      version.publishTraffic === dueTraffic &&
+      version.versionStatus === nextPublishStatus &&
+      plan.status === nextPlanStatus
+    ) {
+      continue
+    }
+    if (!canTransitionFeaturePublishStatus(version.versionStatus, nextPublishStatus)) {
+      const failedAt = nowIso()
+      const nextPlan: PublishPlan = { ...plan, status: 'failed' }
+      abPublishPlans.splice(abPublishPlans.findIndex((item) => item.publishId === nextPlan.publishId), 1, nextPlan)
+      const operationLog: OperationLog = {
+        id: createId('log'),
+        objectType: 'FEATURE_VERSION',
+        objectId: version.versionId,
+        action: 'schedule_feature_publish_failed',
+        operatorId: 'system_scheduler',
+        operatorName: '系统调度',
+        before: { versionStatus: version.versionStatus, publishTraffic: version.publishTraffic, plan },
+        after: {
+          status: 'failed',
+          failureReason: `版本状态 ${version.versionStatus} 不支持定时发布到 ${nextPublishStatus}`,
+          notifyOwners: feature.owners,
+          plan: nextPlan,
+        },
+        createdAt: failedAt,
+      }
+      abOperationLogs.unshift(operationLog)
+      changedPlans.push(nextPlan)
+      operationLogs.push(operationLog)
+      continue
+    }
+    const createdAt = nowIso()
+    const nextVersion: FeatureVersion = {
+      ...version,
+      versionStatus: nextPublishStatus,
+      publishTraffic: dueTraffic,
+    }
+    const nextFeature: FeatureFlag = {
+      ...feature,
+      status: 'enabled',
+      publishStatus: nextPublishStatus,
+      currentVersionId: version.versionId,
+      updatedAt: createdAt,
+    }
+    const nextPlan: PublishPlan = { ...plan, status: nextPlanStatus }
+    abFeatureVersions.splice(abFeatureVersions.findIndex((item) => item.versionId === nextVersion.versionId), 1, nextVersion)
+    abFeatureFlags.splice(abFeatureFlags.findIndex((item) => item.featureId === nextFeature.featureId), 1, nextFeature)
+    abPublishPlans.splice(abPublishPlans.findIndex((item) => item.publishId === nextPlan.publishId), 1, nextPlan)
+    const operationLog: OperationLog = {
+      id: createId('log'),
+      objectType: 'FEATURE_VERSION',
+      objectId: version.versionId,
+      action: 'schedule_feature_publish',
+      operatorId: 'system_scheduler',
+      operatorName: '系统调度',
+      before: { versionStatus: version.versionStatus, publishTraffic: version.publishTraffic, plan },
+      after: { versionStatus: nextVersion.versionStatus, publishTraffic: nextVersion.publishTraffic, plan: nextPlan },
+      createdAt,
+    }
+    abOperationLogs.unshift(operationLog)
+    changedFeatures.push(nextFeature)
+    changedVersions.push(nextVersion)
+    changedPlans.push(nextPlan)
+    operationLogs.push(operationLog)
+  }
+
+  if (changedFeatures.length || changedVersions.length || changedPlans.length || operationLogs.length) {
+    persistCreatedMockState({
+      featureFlags: changedFeatures,
+      featureVersions: changedVersions,
+      publishPlans: changedPlans,
+      operationLogs,
+    })
+  }
+}
+
+export const getAbFeatureFlags = () => {
+  applyDuePublishPlans()
+  return resolveMock(abFeatureFlags.filter((feature) => canViewServiceFeature(feature)))
+}
+export const getAbFeatureVersions = (featureId?: EntityId) => {
+  applyDuePublishPlans()
+  return resolveMock(
+    (featureId ? abFeatureVersions.filter((version) => version.featureId === featureId) : abFeatureVersions)
+      .filter((version) => canViewServiceFeature(findFeature(version.featureId))),
+  )
+}
+export const getAbPublishPlans = () => {
+  applyDuePublishPlans()
+  return resolveMock(abPublishPlans.filter((plan) => canViewServiceFeature(findFeature(plan.featureId))))
+}
+export const getAbWhitelistTests = () => {
+  applyDuePublishPlans()
+  const now = Date.now()
+  for (const test of abWhitelistTests) {
+    if (test.status === 'active' && new Date(test.expiresAt).getTime() <= now) {
+      test.status = 'expired'
+    }
+  }
+  return resolveMock(abWhitelistTests.filter((test) => canViewServiceFeature(findFeature(test.featureId))))
+}
 
 export const createAbFeatureFlag = (
   draft: FeatureFlagDraft,
 ): Promise<{ feature?: FeatureFlag; version?: FeatureVersion; message: string }> => {
+  if (servicePermissionContext.permissions.create_feature !== true) {
+    return resolveMock({ message: featurePermissionDeniedMessage('创建') }, 120)
+  }
   const duplicated = abFeatureFlags.find(
-    (feature) => feature.appId === draft.appId && feature.key.trim() === draft.key.trim(),
+    (feature) => feature.key.trim() === draft.key.trim(),
   )
   if (duplicated) {
     return resolveMock({ feature: duplicated, message: 'Feature Key 已存在，请使用唯一 Key' }, 120)
+  }
+  if (!draft.key.trim()) return resolveMock({ message: '请输入 Key 名称' }, 120)
+  if (draft.key.trim().length > 200) return resolveMock({ message: 'Key 最长不超过 200 个字符' }, 120)
+  if (!featureKeyPattern.test(draft.key.trim())) {
+    return resolveMock({ message: 'Key 仅支持英文字符、数字、下划线' }, 120)
+  }
+  if (!draft.name.trim()) return resolveMock({ message: '请输入 Feature 名称' }, 120)
+  if (draft.name.trim().length > 100) return resolveMock({ message: 'Feature 名称最长不超过 100 个字符' }, 120)
+  if (!featureNamePattern.test(draft.name.trim())) return resolveMock({ message: 'Feature 名称不支持特殊符号' }, 120)
+  if (abFeatureFlags.some((feature) => feature.name.trim() === draft.name.trim())) {
+    return resolveMock({ message: 'Feature 名称已存在，请使用唯一名称' }, 120)
+  }
+  if (draft.description.length > 2048) return resolveMock({ message: 'Feature 描述最长不超过 2048 个字符' }, 120)
+  if (!draft.appId) return resolveMock({ message: '请选择适用 App' }, 120)
+  if (!draft.owners.length) return resolveMock({ message: '至少配置一个 Owner' }, 120)
+  if (draft.tags.length > 10) return resolveMock({ message: '最多添加 10 个标签' }, 120)
+  if (draft.tags.some((tag) => tag.length > 20)) return resolveMock({ message: '单个标签最长 20 个字符' }, 120)
+  if (new Set(draft.tags.map((tag) => tag.toLowerCase())).size !== draft.tags.length) {
+    return resolveMock({ message: '标签已存在' }, 120)
+  }
+  if (!draft.variants.length || !draft.variants.some((variant) => variant.variantId === draft.defaultVariantId)) {
+    return resolveMock({ message: '请至少配置一个变体并选择默认变体' }, 120)
   }
 
   const createdAt = nowIso()
@@ -1861,14 +3194,30 @@ export const createAbFeatureFlag = (
   const versionId = createId('feat_ver')
   const firstVariantId = draft.variants[0]?.variantId
   const defaultVariantId = draft.defaultVariantId ?? firstVariantId
+  const defaultRule = draft.defaultRule ?? {
+    ruleId: 'else',
+    name: '默认规则',
+    order: 999,
+    conditions: [],
+    deliveryType: defaultVariantId ? 'single_variant' as const : 'no_value' as const,
+    variantId: defaultVariantId,
+  }
+  const variantErrors = validateFeatureVariantRules(
+    draft.variantType,
+    draft.variants,
+    draft.audienceRules ?? [],
+    defaultRule,
+  )
+  if (variantErrors.length) return resolveMock({ message: variantErrors[0] ?? '变体配置不完整' }, 120)
   const feature: FeatureFlag = {
     featureId,
     appId: draft.appId,
     key: draft.key.trim(),
     name: draft.name.trim(),
     description: draft.description.trim(),
+    imageUrl: draft.imageUrl,
     terminalType: draft.terminalType,
-    featureType: draft.featureType,
+    featureType: draft.featureType ?? 'public',
     status: 'enabled',
     publishStatus: 'unpublished',
     currentVersionId: versionId,
@@ -1886,16 +3235,9 @@ export const createAbFeatureFlag = (
     versionStatus: 'unpublished',
     variantType: draft.variantType,
     variants: draft.variants,
-    audienceRules: [],
-    defaultRule: {
-      ruleId: 'else',
-      name: '默认规则',
-      order: 999,
-      conditions: [],
-      deliveryType: defaultVariantId ? 'single_variant' : 'no_value',
-      variantId: defaultVariantId,
-    },
-    publishTraffic: 0,
+    audienceRules: [...(draft.audienceRules ?? [])].sort((left, right) => left.order - right.order),
+    defaultRule,
+    publishTraffic: draft.publishTraffic ?? 0,
     createdBy: currentOperator.id,
     createdAt,
   }
@@ -1922,6 +3264,19 @@ export const createAbFeatureVersion = (
 ): Promise<{ version?: FeatureVersion; message: string }> => {
   const feature = findFeature(featureId)
   if (!feature) return resolveMock({ message: 'Feature 不存在' }, 120)
+  if (!canOperateServiceFeature(feature, 'create_feature')) {
+    return resolveMock({ message: featurePermissionDeniedMessage('编辑') }, 120)
+  }
+  if (draft.expectedFeatureUpdatedAt && draft.expectedFeatureUpdatedAt !== feature.updatedAt) {
+    return resolveMock({ message: '当前 Feature 已被他人修改，请刷新后重试' }, 120)
+  }
+  const variantErrors = validateFeatureVariantRules(
+    draft.variantType,
+    draft.variants,
+    draft.audienceRules,
+    draft.defaultRule,
+  )
+  if (variantErrors.length) return resolveMock({ message: variantErrors[0] ?? '版本配置不完整' }, 120)
 
   const createdAt = nowIso()
   const nextNo = abFeatureVersions.filter((version) => version.featureId === featureId).length + 1
@@ -1948,10 +3303,52 @@ export const createAbFeatureVersion = (
     after: { version },
     createdAt,
   }
+  const nextFeature: FeatureFlag = { ...feature, updatedAt: createdAt }
+  abFeatureFlags.splice(abFeatureFlags.findIndex((item) => item.featureId === featureId), 1, nextFeature)
   abFeatureVersions.unshift(version)
   abOperationLogs.unshift(operationLog)
-  persistCreatedMockState({ featureVersions: [version], operationLogs: [operationLog] })
+  persistCreatedMockState({ featureFlags: [nextFeature], featureVersions: [version], operationLogs: [operationLog] })
   return resolveMock({ version, message: 'Feature 版本已创建，等待发布' }, 180)
+}
+
+export const disableAbFeatureVersion = (
+  featureId: EntityId,
+  versionId: EntityId,
+): Promise<{ version?: FeatureVersion; message: string }> => {
+  const feature = findFeature(featureId)
+  const version = findFeatureVersion(versionId)
+  if (!feature || !version || version.featureId !== featureId) {
+    return resolveMock({ message: 'Feature 或版本不存在' }, 120)
+  }
+  if (!canOperateServiceFeature(feature, 'publish_feature')) {
+    return resolveMock({ feature, version, message: featurePermissionDeniedMessage('发布') }, 120)
+  }
+  if (feature.currentVersionId === versionId && ['gray', 'full', 'publish_confirm'].includes(version.versionStatus)) {
+    return resolveMock({ version, message: '当前线上生效版本不可直接禁用，请先回滚或关闭 Feature' }, 120)
+  }
+  if (version.versionStatus === 'disabled') {
+    return resolveMock({ version, message: '版本已禁用' }, 120)
+  }
+  if (!canTransitionFeaturePublishStatus(version.versionStatus, 'disabled')) {
+    return resolveMock({ version, message: `版本状态不支持从 ${version.versionStatus} 禁用` }, 120)
+  }
+  const createdAt = nowIso()
+  const nextVersion: FeatureVersion = { ...version, versionStatus: 'disabled', publishTraffic: 0 }
+  abFeatureVersions.splice(abFeatureVersions.findIndex((item) => item.versionId === versionId), 1, nextVersion)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'FEATURE_VERSION',
+    objectId: versionId,
+    action: 'disable_feature_version',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: { versionStatus: version.versionStatus, publishTraffic: version.publishTraffic },
+    after: { versionStatus: nextVersion.versionStatus, publishTraffic: nextVersion.publishTraffic },
+    createdAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ featureVersions: [nextVersion], operationLogs: [operationLog] })
+  return resolveMock({ version: nextVersion, message: 'Feature 版本已禁用' }, 180)
 }
 
 export const publishAbFeatureVersion = (
@@ -1963,17 +3360,69 @@ export const publishAbFeatureVersion = (
   if (!feature || !version || version.featureId !== featureId) {
     return resolveMock({ message: 'Feature 或版本不存在' }, 120)
   }
+  if (!canOperateServiceFeature(feature, 'publish_feature')) {
+    return resolveMock({ feature, version, message: featurePermissionDeniedMessage('发布') }, 120)
+  }
+  if (feature.status !== 'enabled') {
+    return resolveMock({ feature, version, message: 'Feature 未开启，不能发布版本' }, 120)
+  }
+  if (['disabled', 'rolled_back', 'canceled'].includes(version.versionStatus)) {
+    return resolveMock({ feature, version, message: '已禁用、已回滚或已取消发布的版本不能直接发布' }, 120)
+  }
+  if (!Number.isFinite(request.publishTraffic) || request.publishTraffic < 1 || request.publishTraffic > 100) {
+    return resolveMock({ feature, version, message: '发布流量必须在 1%-100% 之间' }, 120)
+  }
+  if (!request.description.trim()) {
+    return resolveMock({ feature, version, message: '请输入发布描述' }, 120)
+  }
+  if (request.description.trim().length > 500) {
+    return resolveMock({ feature, version, message: '发布描述最长不超过 500 个字符' }, 120)
+  }
+  if (request.rollbackAt && new Date(request.rollbackAt).getTime() <= Date.now()) {
+    return resolveMock({ feature, version, message: '定时下线时间必须晚于当前时间' }, 120)
+  }
 
   const createdAt = nowIso()
   const isScheduled =
     request.publishType === 'scheduled' &&
     request.scheduledAt !== undefined &&
     new Date(request.scheduledAt).getTime() > Date.now()
+  if (request.publishType === 'scheduled' && !isScheduled) {
+    return resolveMock({ feature, version, message: '首次发布时间必须晚于当前时间' }, 120)
+  }
+  const steps = request.scheduleSteps?.length
+    ? [...request.scheduleSteps].sort((left, right) => left.stepNo - right.stepNo)
+    : [
+        {
+          stepNo: 1,
+          publishTime: request.scheduledAt ?? createdAt,
+          traffic: request.publishTraffic,
+        },
+      ]
+  const invalidStep = steps.some((step, index) => {
+    const previous = steps[index - 1]
+    return (
+      step.traffic < 1 ||
+      step.traffic > 100 ||
+      (previous !== undefined &&
+        (step.traffic <= previous.traffic ||
+          new Date(step.publishTime).getTime() <= new Date(previous.publishTime).getTime())) ||
+      (isScheduled && new Date(step.publishTime).getTime() <= Date.now())
+    )
+  })
+  if (invalidStep || Math.abs((steps.at(-1)?.traffic ?? 0) - request.publishTraffic) > 0.001) {
+    return resolveMock({ feature, version, message: '发布计划需时间递增、流量递增，最后一步等于目标流量' }, 120)
+  }
   const publishStatus = isScheduled
     ? 'pending_publish'
-    : request.publishTraffic >= 100
+    : request.requireConfirmation
+      ? 'publish_confirm'
+      : request.publishTraffic >= 100
       ? 'full'
       : 'gray'
+  if (!canTransitionFeaturePublishStatus(version.versionStatus, publishStatus)) {
+    return resolveMock({ feature, version, message: `版本状态不支持从 ${version.versionStatus} 发布到 ${publishStatus}` }, 120)
+  }
   const nextVersion: FeatureVersion = {
     ...version,
     versionStatus: publishStatus,
@@ -1991,15 +3440,10 @@ export const publishAbFeatureVersion = (
     featureId,
     versionId: version.versionId,
     publishType: request.publishType,
-    description: request.description,
-    steps: [
-      {
-        stepNo: 1,
-        publishTime: request.scheduledAt ?? createdAt,
-        traffic: request.publishTraffic,
-      },
-    ],
-    rollbackAt: null,
+    status: isScheduled ? 'pending' : publishStatus === 'full' ? 'completed' : 'running',
+    description: request.description.trim(),
+    steps,
+    rollbackAt: request.rollbackAt ?? null,
     createdBy: currentOperator.id,
   }
   const featureIndex = abFeatureFlags.findIndex((item) => item.featureId === featureId)
@@ -2028,21 +3472,130 @@ export const publishAbFeatureVersion = (
   return resolveMock({ feature: nextFeature, version: nextVersion, plan, message: 'Feature 发布任务已创建' }, 220)
 }
 
+export const cancelAbFeaturePublish = (
+  featureId: EntityId,
+  versionId: EntityId,
+): Promise<{ feature?: FeatureFlag; version?: FeatureVersion; plan?: PublishPlan; message: string }> => {
+  const feature = findFeature(featureId)
+  const version = findFeatureVersion(versionId)
+  if (!feature || !version || version.featureId !== featureId) {
+    return resolveMock({ message: 'Feature 或版本不存在' }, 120)
+  }
+  if (!canOperateServiceFeature(feature, 'publish_feature')) {
+    return resolveMock({ feature, version, message: featurePermissionDeniedMessage('发布') }, 120)
+  }
+  if (version.versionStatus !== 'pending_publish') {
+    return resolveMock({ feature, version, message: '仅未到首次发布时间的定时发布可以取消' }, 120)
+  }
+  if (!canTransitionFeaturePublishStatus(version.versionStatus, 'canceled')) {
+    return resolveMock({ feature, version, message: `版本状态不支持从 ${version.versionStatus} 取消发布` }, 120)
+  }
+  const createdAt = nowIso()
+  const latestFullVersion = [...abFeatureVersions]
+    .filter((item) => item.featureId === featureId && item.versionId !== versionId && item.versionStatus === 'full')
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+  const nextVersion: FeatureVersion = { ...version, versionStatus: 'canceled', publishTraffic: 0 }
+  const nextFeature: FeatureFlag = {
+    ...feature,
+    currentVersionId: latestFullVersion?.versionId ?? feature.currentVersionId,
+    publishStatus: latestFullVersion ? 'full' : 'disabled',
+    status: latestFullVersion ? 'enabled' : 'disabled',
+    updatedAt: createdAt,
+  }
+  const planIndex = abPublishPlans.findIndex((plan) => plan.featureId === featureId && plan.versionId === versionId && plan.status !== 'canceled')
+  const existingPlan = planIndex >= 0 ? abPublishPlans[planIndex] : undefined
+  const nextPlan: PublishPlan | undefined = existingPlan ? { ...existingPlan, status: 'canceled' } : undefined
+  abFeatureVersions.splice(abFeatureVersions.findIndex((item) => item.versionId === versionId), 1, nextVersion)
+  abFeatureFlags.splice(abFeatureFlags.findIndex((item) => item.featureId === featureId), 1, nextFeature)
+  if (nextPlan) abPublishPlans.splice(planIndex, 1, nextPlan)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'FEATURE_VERSION',
+    objectId: versionId,
+    action: 'cancel_feature_publish',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: { versionStatus: version.versionStatus, publishTraffic: version.publishTraffic },
+    after: { versionStatus: nextVersion.versionStatus, publishTraffic: nextVersion.publishTraffic },
+    createdAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({
+    featureFlags: [nextFeature],
+    featureVersions: [nextVersion],
+    publishPlans: nextPlan ? [nextPlan] : [],
+    operationLogs: [operationLog],
+  })
+  return resolveMock({ feature: nextFeature, version: nextVersion, plan: nextPlan, message: 'Feature 发布已取消' }, 180)
+}
+
 export const rollbackAbFeature = (
   featureId: EntityId,
   targetVersionId?: EntityId,
 ): Promise<{ feature?: FeatureFlag; version?: FeatureVersion; message: string }> => {
   const feature = findFeature(featureId)
   if (!feature) return resolveMock({ message: 'Feature 不存在' }, 120)
+  if (!canOperateServiceFeature(feature, 'rollback_feature')) {
+    return resolveMock({ feature, message: featurePermissionDeniedMessage('回滚') }, 120)
+  }
+  if (!['gray', 'publish_confirm', 'full'].includes(feature.publishStatus)) {
+    return resolveMock({ feature, message: '仅灰度中、发布确认或已全量 Feature 可以回滚' }, 120)
+  }
+  if (!canTransitionFeaturePublishStatus(feature.publishStatus, 'rolled_back')) {
+    return resolveMock({ feature, message: `发布状态不支持从 ${feature.publishStatus} 回滚` }, 120)
+  }
 
   const candidateVersions = abFeatureVersions.filter((version) => version.featureId === featureId)
+  const currentVersion = feature.currentVersionId ? findFeatureVersion(feature.currentVersionId) : undefined
+  const explicitTarget = candidateVersions.find((version) => version.versionId === targetVersionId)
+  if (explicitTarget && ['disabled', 'rolled_back', 'unpublished', 'canceled'].includes(explicitTarget.versionStatus)) {
+    return resolveMock({ feature, version: explicitTarget, message: '目标版本不可回滚或不可恢复' }, 120)
+  }
   const target =
-    candidateVersions.find((version) => version.versionId === targetVersionId) ??
-    candidateVersions.find((version) => version.versionId !== feature.currentVersionId) ??
-    candidateVersions[0]
-  if (!target) return resolveMock({ feature, message: '没有可回滚版本' }, 120)
-
+    explicitTarget?.versionStatus === 'full'
+      ? explicitTarget
+      : [...candidateVersions]
+          .filter((version) => version.versionId !== feature.currentVersionId && version.versionStatus === 'full')
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
   const createdAt = nowIso()
+  if (!target) {
+    const nextFeature: FeatureFlag = {
+      ...feature,
+      status: 'disabled',
+      publishStatus: 'disabled',
+      updatedAt: createdAt,
+    }
+    const nextCurrentVersion = currentVersion
+      ? { ...currentVersion, versionStatus: 'rolled_back' as const, publishTraffic: 0 }
+      : undefined
+    abFeatureFlags.splice(abFeatureFlags.findIndex((item) => item.featureId === featureId), 1, nextFeature)
+    if (nextCurrentVersion) {
+      abFeatureVersions.splice(
+        abFeatureVersions.findIndex((item) => item.versionId === nextCurrentVersion.versionId),
+        1,
+        nextCurrentVersion,
+      )
+    }
+    const operationLog: OperationLog = {
+      id: createId('log'),
+      objectType: 'FEATURE',
+      objectId: featureId,
+      action: 'rollback_feature_close',
+      operatorId: currentOperator.id,
+      operatorName: currentOperator.name,
+      before: { currentVersionId: feature.currentVersionId, publishStatus: feature.publishStatus },
+      after: { status: nextFeature.status, publishStatus: nextFeature.publishStatus },
+      createdAt,
+    }
+    abOperationLogs.unshift(operationLog)
+    persistCreatedMockState({
+      featureFlags: [nextFeature],
+      featureVersions: nextCurrentVersion ? [nextCurrentVersion] : [],
+      operationLogs: [operationLog],
+    })
+    return resolveMock({ feature: nextFeature, version: nextCurrentVersion, message: '无历史全量版本，已关闭 Feature 并回退到本地默认值' }, 220)
+  }
+
   const nextFeature: FeatureFlag = {
     ...feature,
     currentVersionId: target.versionId,
@@ -2055,10 +3608,9 @@ export const rollbackAbFeature = (
     versionStatus: 'full',
     publishTraffic: 100,
   }
-  const oldCurrentVersion = feature.currentVersionId ? findFeatureVersion(feature.currentVersionId) : undefined
   const nextOldCurrentVersion =
-    oldCurrentVersion && oldCurrentVersion.versionId !== nextVersion.versionId
-      ? { ...oldCurrentVersion, versionStatus: 'rolled_back' as const, publishTraffic: 0 }
+    currentVersion && currentVersion.versionId !== nextVersion.versionId
+      ? { ...currentVersion, versionStatus: 'rolled_back' as const, publishTraffic: 0 }
       : undefined
   abFeatureFlags.splice(abFeatureFlags.findIndex((item) => item.featureId === featureId), 1, nextFeature)
   abFeatureVersions.splice(abFeatureVersions.findIndex((item) => item.versionId === nextVersion.versionId), 1, nextVersion)
@@ -2095,15 +3647,69 @@ export const createAbWhitelistTest = (
 ): Promise<{ test?: WhitelistTest; message: string }> => {
   const feature = findFeature(featureId)
   if (!feature) return resolveMock({ message: 'Feature 不存在' }, 120)
+  if (!canOperateServiceFeature(feature, 'create_feature')) {
+    return resolveMock({ message: featurePermissionDeniedMessage('白名单测试') }, 120)
+  }
 
   const createdAt = nowIso()
+  if (!draft.name.trim()) return resolveMock({ message: '请输入白名单测试名称' }, 120)
+  const expiresAtMs = new Date(draft.expiresAt).getTime()
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    return resolveMock({ message: '失效时间不能早于当前时间' }, 120)
+  }
+  if (expiresAtMs - Date.now() > 7 * 24 * 60 * 60 * 1000) {
+    return resolveMock({ message: '白名单失效时间不能超过 7 天' }, 120)
+  }
+  const ruleEntries = Object.entries(draft.ruleUserIds)
+  if (!ruleEntries.length || ruleEntries.some(([, userIds]) => !userIds.map((userId) => userId.trim()).filter(Boolean).length)) {
+    return resolveMock({ message: '每条启用规则至少需要一个白名单用户' }, 120)
+  }
+  const allUserIds = ruleEntries.flatMap(([, userIds]) => userIds.map((userId) => userId.trim()).filter(Boolean))
+  const invalidUserId = allUserIds.find((userId) => !whitelistUserIdPattern.test(userId))
+  if (invalidUserId) {
+    return resolveMock({ message: `白名单用户 ID 格式不合法：${invalidUserId}` }, 120)
+  }
+  if (new Set(allUserIds).size !== allUserIds.length) {
+    const seen = new Map<string, string>()
+    const duplicated = ruleEntries
+      .flatMap(([ruleId, userIds]) => userIds.map((userId) => ({ ruleId, userId: userId.trim() })).filter((item) => item.userId))
+      .find((item) => {
+        const previousRule = seen.get(item.userId)
+        if (previousRule !== undefined) return true
+        seen.set(item.userId, item.ruleId)
+        return false
+      })
+    return resolveMock({ message: duplicated ? `用户 ${duplicated.userId} 已存在于其他规则，请先删除重复用户` : '白名单用户不能在同一测试内重复出现在多个规则' }, 120)
+  }
+  const versionMode = draft.versionMode ?? (draft.versionId ? 'existing' : 'custom')
+  if (versionMode === 'existing' && !draft.versionId) {
+    return resolveMock({ message: '请选择已有 Feature 版本' }, 120)
+  }
+  if (versionMode === 'custom' && !draft.customVariants?.length) {
+    return resolveMock({ message: '自定义白名单需要配置变体信息' }, 120)
+  }
+  if (versionMode === 'custom' && draft.customVariants?.length) {
+    const firstValue = draft.customVariants[0]?.value
+    const customVariantType = inferFeatureVariantType(firstValue)
+    const customDefaultRule = draft.customAudienceRules?.find((rule) => rule.ruleId === 'else') ?? createDefaultWhitelistRule(draft.customVariants[0]?.variantId)
+    const customErrors = validateFeatureVariantRules(
+      customVariantType,
+      draft.customVariants,
+      (draft.customAudienceRules ?? []).filter((rule) => rule.ruleId !== 'else'),
+      customDefaultRule,
+    )
+    if (customErrors.length) return resolveMock({ message: customErrors[0] ?? '自定义白名单配置不完整' }, 120)
+  }
   const test: WhitelistTest = {
     id: createId('wl'),
     featureId,
     name: draft.name.trim(),
+    versionMode,
     versionId: draft.versionId,
     status: 'active',
     expiresAt: draft.expiresAt,
+    customVariants: draft.customVariants,
+    customAudienceRules: draft.customAudienceRules,
     ruleUserIds: draft.ruleUserIds,
     createdBy: currentOperator.id,
     createdAt,
@@ -2121,7 +3727,94 @@ export const createAbWhitelistTest = (
   abWhitelistTests.unshift(test)
   abOperationLogs.unshift(operationLog)
   persistCreatedMockState({ whitelistTests: [test], operationLogs: [operationLog] })
-  return resolveMock({ test, message: '白名单测试已创建' }, 180)
+  return resolveMock({ test, message: '白名单测试已创建，状态为生效中，预计 1 分钟内生效' }, 180)
+}
+
+export const terminateAbWhitelistTest = (
+  testId: EntityId,
+): Promise<{ test?: WhitelistTest; message: string }> => {
+  const test = abWhitelistTests.find((item) => item.id === testId)
+  if (!test) return resolveMock({ message: '白名单测试不存在' }, 120)
+  if (!canOperateServiceFeature(findFeature(test.featureId), 'create_feature')) {
+    return resolveMock({ test, message: featurePermissionDeniedMessage('白名单测试') }, 120)
+  }
+  if (test.status !== 'active') return resolveMock({ test, message: '当前白名单已失效或已终止' }, 120)
+  const createdAt = nowIso()
+  const nextTest: WhitelistTest = { ...test, status: 'terminated' }
+  abWhitelistTests.splice(abWhitelistTests.findIndex((item) => item.id === testId), 1, nextTest)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'FEATURE',
+    objectId: test.featureId,
+    action: 'terminate_whitelist_test',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: { status: test.status },
+    after: { status: nextTest.status },
+    createdAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ whitelistTests: [nextTest], operationLogs: [operationLog] })
+  return resolveMock({ test: nextTest, message: '白名单测试已终止' }, 180)
+}
+
+export const copyAbWhitelistTest = (
+  testId: EntityId,
+): Promise<{ test?: WhitelistTest; message: string }> => {
+  const test = abWhitelistTests.find((item) => item.id === testId)
+  if (!test) return resolveMock({ message: '白名单测试不存在' }, 120)
+  if (!canOperateServiceFeature(findFeature(test.featureId), 'create_feature')) {
+    return resolveMock({ test, message: featurePermissionDeniedMessage('白名单测试') }, 120)
+  }
+  const createdAt = nowIso()
+  const copied: WhitelistTest = {
+    ...test,
+    id: createId('wl'),
+    name: `${test.name} 副本`,
+    status: 'active',
+    expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+    createdBy: currentOperator.id,
+    createdAt,
+  }
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'FEATURE',
+    objectId: test.featureId,
+    action: 'copy_whitelist_test',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    after: { copiedFrom: test.id, test: copied },
+    createdAt,
+  }
+  abWhitelistTests.unshift(copied)
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ whitelistTests: [copied], operationLogs: [operationLog] })
+  return resolveMock({ test: copied, message: '白名单测试已复制' }, 180)
+}
+
+export const deleteAbWhitelistTest = (
+  testId: EntityId,
+): Promise<{ message: string }> => {
+  const test = abWhitelistTests.find((item) => item.id === testId)
+  if (!test) return resolveMock({ message: '白名单测试不存在' }, 120)
+  if (!canOperateServiceFeature(findFeature(test.featureId), 'create_feature')) {
+    return resolveMock({ message: featurePermissionDeniedMessage('白名单测试') }, 120)
+  }
+  const createdAt = nowIso()
+  abWhitelistTests.splice(abWhitelistTests.findIndex((item) => item.id === testId), 1)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'FEATURE',
+    objectId: test.featureId,
+    action: 'delete_whitelist_test',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: { test },
+    createdAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ deletedWhitelistTestIds: [testId], operationLogs: [operationLog] })
+  return resolveMock({ message: '白名单测试已删除' }, 180)
 }
 
 export const changeAbFeatureLifecycle = (
@@ -2130,11 +3823,37 @@ export const changeAbFeatureLifecycle = (
 ): Promise<{ feature?: FeatureFlag; message: string }> => {
   const feature = findFeature(featureId)
   if (!feature) return resolveMock({ message: 'Feature 不存在' }, 120)
+  if (!canOperateServiceFeature(feature, 'delete_feature')) {
+    return resolveMock({ feature, message: featurePermissionDeniedMessage('生命周期管理') }, 120)
+  }
+  const nextStatus = action === 'enable' ? 'enabled' : action === 'disable' ? 'disabled' : 'deleted'
+  if (action === 'delete') {
+    if (feature.status === 'enabled') {
+      return resolveMock({ feature, message: '开启状态不可删除，请先关闭 Feature' }, 120)
+    }
+    const runningExperiment = feature.relatedExperimentIds
+      .map((experimentId) => findExperiment(experimentId))
+      .find((experiment): experiment is Experiment => experiment?.status === 'RUNNING')
+    if (runningExperiment) {
+      return resolveMock({ feature, message: `当前 Feature 存在运行中的关联实验「${runningExperiment.name}」，不可删除` }, 120)
+    }
+    const blockingVersion = abFeatureVersions.find(
+      (version) =>
+        version.featureId === featureId &&
+        ['pending_publish', 'gray', 'publish_confirm'].includes(version.versionStatus),
+    )
+    if (blockingVersion) {
+      return resolveMock({ feature, message: '当前 Feature 存在灰度中、发布确认或待发布版本，不可删除' }, 120)
+    }
+  }
+  if (!canTransitionFeatureStatus(feature.status, nextStatus)) {
+    return resolveMock({ feature, message: `Feature 状态不支持从 ${feature.status} 变更为 ${nextStatus}` }, 120)
+  }
 
   const createdAt = nowIso()
   const nextFeature: FeatureFlag = {
     ...feature,
-    status: action === 'enable' ? 'enabled' : action === 'disable' ? 'disabled' : 'deleted',
+    status: nextStatus,
     publishStatus: action === 'enable' ? feature.publishStatus : action === 'disable' ? 'disabled' : 'canceled',
     updatedAt: createdAt,
   }
@@ -2153,6 +3872,39 @@ export const changeAbFeatureLifecycle = (
   abOperationLogs.unshift(operationLog)
   persistCreatedMockState({ featureFlags: [nextFeature], operationLogs: [operationLog] })
   return resolveMock({ feature: nextFeature, message: 'Feature 生命周期状态已更新' }, 180)
+}
+
+export const updateAbFeaturePermission = (
+  featureId: EntityId,
+  featureType: FeatureFlag['featureType'],
+): Promise<{ feature?: FeatureFlag; message: string }> => {
+  const feature = findFeature(featureId)
+  if (!feature) return resolveMock({ message: 'Feature 不存在' }, 120)
+  if (!canOperateServiceFeature(feature, 'manage_feature_permission')) {
+    return resolveMock({ feature, message: featurePermissionDeniedMessage('权限管理') }, 120)
+  }
+
+  const createdAt = nowIso()
+  const nextFeature: FeatureFlag = {
+    ...feature,
+    featureType,
+    updatedAt: createdAt,
+  }
+  abFeatureFlags.splice(abFeatureFlags.findIndex((item) => item.featureId === featureId), 1, nextFeature)
+  const operationLog: OperationLog = {
+    id: createId('log'),
+    objectType: 'FEATURE',
+    objectId: featureId,
+    action: 'feature_permission_update',
+    operatorId: currentOperator.id,
+    operatorName: currentOperator.name,
+    before: { featureType: feature.featureType },
+    after: { featureType },
+    createdAt,
+  }
+  abOperationLogs.unshift(operationLog)
+  persistCreatedMockState({ featureFlags: [nextFeature], operationLogs: [operationLog] })
+  return resolveMock({ feature: nextFeature, message: 'Feature 权限类型已更新' }, 180)
 }
 
 function inferFeatureVariantValue(variant: ExperimentVariant) {
@@ -2175,58 +3927,133 @@ export const solidifyExperimentToFeature = (
   const experimentVariants = abExperimentVariants.filter((variant) => variant.experimentId === request.experimentId)
   const winner = experimentVariants.find((variant) => variant.id === request.winnerVariantId)
   if (!experiment || !winner) return resolveMock({ message: '实验或胜出版本不存在' }, 120)
+  const featureKey = request.featureKey.trim()
+  const featureName = request.featureName.trim()
+  const targetAppId = request.appId || experiment.appId
+  const description = (request.description ?? `由实验「${experiment.name}」固化生成。`).trim()
+  const ownerIds = request.ownerIds?.length ? request.ownerIds : [experiment.ownerId]
+  const tags = request.tags?.length ? request.tags : [...experiment.tags, '实验固化']
+  if (!featureKey) return resolveMock({ message: '请输入 Feature Key' }, 120)
+  if (featureKey.length > 200) return resolveMock({ message: 'Feature Key 最长不超过 200 个字符' }, 120)
+  if (!featureKeyPattern.test(featureKey)) return resolveMock({ message: 'Feature Key 仅支持英文字符、数字、下划线' }, 120)
+  if (!featureName) return resolveMock({ message: '请输入 Feature 名称' }, 120)
+  if (featureName.length > 100) return resolveMock({ message: 'Feature 名称最长不超过 100 个字符' }, 120)
+  if (!featureNamePattern.test(featureName)) return resolveMock({ message: 'Feature 名称不支持特殊符号' }, 120)
+  if (description.length > 2048) return resolveMock({ message: 'Feature 描述最长不超过 2048 个字符' }, 120)
+  if (!targetAppId) return resolveMock({ message: '请选择适用 App' }, 120)
+  if (!ownerIds.length) return resolveMock({ message: '至少配置一个 Owner' }, 120)
+  if (tags.length > 10) return resolveMock({ message: '最多添加 10 个标签' }, 120)
+  if (tags.some((tag) => tag.length > 20)) return resolveMock({ message: '单个标签最长 20 个字符' }, 120)
+  if (new Set(tags.map((tag) => tag.toLowerCase())).size !== tags.length) {
+    return resolveMock({ message: '标签已存在' }, 120)
+  }
+  const rolloutRows = request.variantRollouts?.filter((item) => item.traffic > 0) ?? []
+  const selectedRollouts = rolloutRows.length ? rolloutRows : [{ experimentVariantId: winner.id, traffic: 100 }]
+  const selectedIds = new Set(selectedRollouts.map((item) => item.experimentVariantId))
+  const selectedVariants = experimentVariants.filter((variant) => selectedIds.has(variant.id))
+  if (!selectedVariants.length) return resolveMock({ message: '请选择至少一个实验分组用于固化' }, 120)
+  const trafficTotal = Number(selectedRollouts.reduce((sum, item) => sum + item.traffic, 0).toFixed(2))
+  if (Math.abs(trafficTotal - 100) > 0.001) {
+    return resolveMock({ message: '多组固化比例合计必须等于 100%' }, 120)
+  }
+
+  const winnerValue = inferFeatureVariantValue(winner)
+  const variantType = inferFeatureVariantType(winnerValue)
+  const mismatchedVariant = selectedVariants.find(
+    (variant) => inferFeatureVariantType(inferFeatureVariantValue(variant)) !== variantType,
+  )
+  if (mismatchedVariant) {
+    return resolveMock({ message: `实验分组「${mismatchedVariant.name}」参数类型与胜出组不一致，无法固化到同一 Feature` }, 120)
+  }
 
   const createdAt = nowIso()
-  const existingFeature = abFeatureFlags.find(
-    (feature) => feature.appId === experiment.appId && feature.key === request.featureKey.trim(),
-  )
+  const existingFeature = abFeatureFlags.find((feature) => feature.key === featureKey)
+  if (existingFeature && existingFeature.appId !== targetAppId) {
+    return resolveMock({ feature: existingFeature, message: 'Feature Key 已存在于其他 App，请更换 Key 或在对应 App 内固化' }, 120)
+  }
+  if (existingFeature && !canOperateServiceFeature(existingFeature, 'create_feature')) {
+    return resolveMock({ feature: existingFeature, message: featurePermissionDeniedMessage('实验固化') }, 120)
+  }
+  if (!existingFeature && servicePermissionContext.permissions.create_feature !== true) {
+    return resolveMock({ message: featurePermissionDeniedMessage('实验固化') }, 120)
+  }
+  if (!existingFeature && abFeatureFlags.some((feature) => feature.name.trim() === featureName)) {
+    return resolveMock({ message: 'Feature 名称已存在，请使用唯一名称' }, 120)
+  }
+  const existingLatestVersion = existingFeature
+    ? [...abFeatureVersions]
+        .filter((versionItem) => versionItem.featureId === existingFeature.featureId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+    : undefined
+  if (existingLatestVersion && existingLatestVersion.variantType !== variantType) {
+    return resolveMock({
+      feature: existingFeature,
+      message: `已有 Feature 变体类型为 ${existingLatestVersion.variantType}，与实验固化类型 ${variantType} 不兼容`,
+    }, 120)
+  }
   const featureId = existingFeature?.featureId ?? createId('feat')
-  const featureVariants = experimentVariants.map((variant) => ({
-    variantId: `solid_${variant.id}`,
-    name: variant.name,
-    value: inferFeatureVariantValue(variant),
-    description: variant.description ?? `${experiment.name} 固化版本`,
-  }))
+  const featureVariants = selectedVariants.map((variant) => {
+    const override = request.variantOverrides?.find((item) => item.experimentVariantId === variant.id)
+    return {
+      variantId: `solid_${variant.id}`,
+      name: override?.name.trim() || variant.name,
+      value: inferFeatureVariantValue(variant),
+      description: override?.description?.trim() || variant.description || `${experiment.name} 固化版本`,
+    }
+  })
   const winnerFeatureVariantId = `solid_${winner.id}`
-  const winnerValue = inferFeatureVariantValue(winner)
+  const defaultRule =
+    selectedRollouts.length > 1
+      ? {
+          ruleId: 'else',
+          name: '默认规则',
+          order: 999,
+          conditions: [],
+          deliveryType: 'multi_variant' as const,
+          variantWeights: selectedRollouts.map((item) => ({
+            variantId: `solid_${item.experimentVariantId}`,
+            weight: item.traffic,
+          })),
+        }
+      : {
+          ruleId: 'else',
+          name: '默认规则',
+          order: 999,
+          conditions: [],
+          deliveryType: 'single_variant' as const,
+          variantId: winnerFeatureVariantId,
+        }
   const version: FeatureVersion = {
     versionId: createId('feat_ver'),
     featureId,
     versionNo: `V${abFeatureVersions.filter((item) => item.featureId === featureId).length + 1}`,
-    versionStatus: request.rolloutTraffic >= 100 ? 'full' : 'gray',
-    variantType: inferFeatureVariantType(winnerValue),
+    versionStatus: 'unpublished',
+    variantType,
     variants: featureVariants,
     audienceRules: [],
-    defaultRule: {
-      ruleId: 'else',
-      name: '默认规则',
-      order: 999,
-      conditions: [],
-      deliveryType: 'single_variant',
-      variantId: winnerFeatureVariantId,
-    },
-    publishTraffic: request.rolloutTraffic,
+    defaultRule,
+    publishTraffic: 0,
     createdBy: currentOperator.id,
     createdAt,
   }
   const feature: FeatureFlag = {
     ...(existingFeature ?? {
       featureId,
-      appId: experiment.appId,
-      key: request.featureKey.trim(),
-      name: request.featureName.trim(),
-      description: `由实验「${experiment.name}」固化生成。`,
-      terminalType: experiment.type === 'CLIENT_CODE' || experiment.type === 'VISUAL' ? 'client' : 'server',
-      featureType: experiment.visibility === 'PRIVATE' ? 'private' : 'public',
-      owners: [experiment.ownerId],
-      tags: [...experiment.tags, '实验固化'],
+      appId: targetAppId,
+      key: featureKey,
+      name: featureName,
+      description,
+      terminalType: request.terminalType ?? (experiment.type === 'CLIENT_CODE' || experiment.type === 'VISUAL' ? 'client' : 'server'),
+      featureType: request.featureType ?? (experiment.visibility === 'PRIVATE' ? 'private' : 'public'),
+      owners: ownerIds,
+      tags,
       relatedExperimentIds: [],
       createdBy: currentOperator.id,
       createdAt,
     }),
     status: 'enabled',
-    publishStatus: version.versionStatus,
-    currentVersionId: version.versionId,
+    publishStatus: 'unpublished',
+    currentVersionId: existingFeature?.currentVersionId ?? version.versionId,
     relatedExperimentIds: [...new Set([...(existingFeature?.relatedExperimentIds ?? []), experiment.id])],
     updatedAt: createdAt,
   }
@@ -2248,7 +4075,99 @@ export const solidifyExperimentToFeature = (
   }
   abOperationLogs.unshift(operationLog)
   persistCreatedMockState({ featureFlags: [feature], featureVersions: [version], operationLogs: [operationLog] })
-  return resolveMock({ feature, version, message: '实验结果已固化为 Feature' }, 240)
+  return resolveMock({ feature, version, message: '实验结果已生成未发布 Feature 版本，请进入发布流程后再线上生效' }, 240)
+}
+
+function findActiveWhitelistMatch(featureId: EntityId, userId: string) {
+  const now = Date.now()
+  for (const test of abWhitelistTests.filter((item) => item.featureId === featureId)) {
+    if (test.status === 'active' && new Date(test.expiresAt).getTime() <= now) {
+      test.status = 'expired'
+    }
+    if (test.status !== 'active') continue
+    const matchedRuleId = Object.entries(test.ruleUserIds).find(([, userIds]) =>
+      userIds.map((item) => item.trim()).includes(userId),
+    )?.[0]
+    if (matchedRuleId) return { test, ruleId: matchedRuleId }
+  }
+  return undefined
+}
+
+function createDefaultWhitelistRule(variantId?: EntityId): AudienceRule {
+  return {
+    ruleId: 'else',
+    name: '白名单默认规则',
+    order: 999,
+    conditions: [],
+    deliveryType: variantId ? 'single_variant' : 'no_value',
+    variantId,
+  }
+}
+
+function buildWhitelistVersion(feature: FeatureFlag, test: WhitelistTest): FeatureVersion | undefined {
+  const existingVersion = test.versionId ? findFeatureVersion(test.versionId) : undefined
+  if ((test.versionMode ?? 'existing') !== 'custom') {
+    return existingVersion ?? findFeatureVersion(feature.currentVersionId ?? '')
+  }
+  const variants: FeatureVariant[] = test.customVariants ?? []
+  const firstVariant = variants[0]
+  return {
+    versionId: test.versionId ?? `${test.id}_custom`,
+    featureId: feature.featureId,
+    versionNo: '白名单自定义',
+    versionStatus: 'full',
+    variantType: inferFeatureVariantType(firstVariant?.value),
+    variants,
+    audienceRules: [...(test.customAudienceRules ?? [])].sort((left, right) => left.order - right.order),
+    defaultRule: createDefaultWhitelistRule(firstVariant?.variantId),
+    publishTraffic: 100,
+    createdBy: test.createdBy,
+    createdAt: test.createdAt,
+  }
+}
+
+function selectWeightedVariant(rule: AudienceRule, userId: string) {
+  if (!rule.variantWeights?.length) return undefined
+  const bucket = hashSubject(`${rule.ruleId}:${userId}`) % 100
+  let accumulated = 0
+  return rule.variantWeights.find((item) => {
+    accumulated += item.weight
+    return bucket < accumulated
+  })?.variantId
+}
+
+function resolveWhitelistDecision(
+  feature: FeatureFlag,
+  version: FeatureVersion | undefined,
+  ruleId: EntityId,
+  userId: string,
+  localDefault?: unknown,
+): FeatureDecisionResult {
+  const ruleCandidates = version ? [...version.audienceRules, version.defaultRule] : []
+  const rule = ruleCandidates.find((item) => item.ruleId === ruleId) ?? version?.defaultRule
+  const variantId = rule?.variantId ?? (rule ? selectWeightedVariant(rule, userId) : undefined) ?? version?.variants[0]?.variantId
+  const variant = version?.variants.find((item) => item.variantId === variantId)
+  return {
+    featureKey: feature.key,
+    value: variant?.value ?? localDefault,
+    variantId: variant?.variantId,
+    variantName: variant?.name,
+    versionId: version?.versionId,
+    decisionSource: 'whitelist',
+    decisionReason: 'matched_whitelist',
+    ruleId: rule?.ruleId,
+    isDefaultValue: !variant,
+  }
+}
+
+function isRunningExperimentHit(feature: FeatureFlag, userId: string, manualHit?: boolean) {
+  if (manualHit === true) return true
+  if (manualHit === false) return false
+  const runningExperiment = feature.relatedExperimentIds
+    .map((experimentId) => findExperiment(experimentId))
+    .find((experiment): experiment is Experiment => experiment?.status === 'RUNNING')
+  if (!runningExperiment) return false
+  return (hashSubject(`${runningExperiment.id}:${userId}`) % 100) < runningExperiment.trafficRatio
 }
 
 export const decideAbFeature = (input: {
@@ -2261,14 +4180,31 @@ export const decideAbFeature = (input: {
 }): Promise<FeatureDecisionResult> => {
   const feature = abFeatureFlags.find((item) => item.featureId === input.featureId)
   const version = abFeatureVersions.find((item) => item.versionId === feature?.currentVersionId)
+  if (feature) {
+    const whitelistMatch = input.inWhitelist
+      ? findActiveWhitelistMatch(feature.featureId, input.userId) ?? { test: abWhitelistTests.find((test) => test.featureId === feature.featureId), ruleId: 'else' }
+      : findActiveWhitelistMatch(feature.featureId, input.userId)
+    if (whitelistMatch?.test) {
+      return resolveMock(
+        resolveWhitelistDecision(
+          feature,
+          buildWhitelistVersion(feature, whitelistMatch.test),
+          whitelistMatch.ruleId,
+          input.userId,
+          input.localDefault,
+        ),
+        120,
+      )
+    }
+  }
   return resolveMock(
     evaluateFeatureDecision({
       feature,
       version,
       userId: input.userId,
       context: input.context,
-      inWhitelist: input.inWhitelist,
-      inExperiment: input.inExperiment,
+      inWhitelist: false,
+      inExperiment: feature ? isRunningExperimentHit(feature, input.userId, input.inExperiment) : input.inExperiment,
       localDefault: input.localDefault,
     }),
     120,
@@ -2276,7 +4212,10 @@ export const decideAbFeature = (input: {
 }
 
 export const getAbOperationLogs = (objectId?: EntityId): Promise<OperationLog[]> =>
-  resolveMock(objectId ? abOperationLogs.filter((log) => log.objectId === objectId) : abOperationLogs)
+  resolveMock(
+    (objectId ? abOperationLogs.filter((log) => log.objectId === objectId) : abOperationLogs)
+      .filter((log) => canViewOperationLog(log)),
+  )
 
 export const getAbExperimentTemplates = (): Promise<ExperimentTemplate[]> => resolveMock(abExperimentTemplates)
 
@@ -2509,11 +4448,25 @@ export const abTestingService = {
   getTrafficLayers: getAbTrafficLayers,
   getMutexDomainGroups: getAbMutexDomainGroups,
   getMetricGroups: getAbMetricGroups,
+  getMetricDirectoryGroups: getAbMetricDirectoryGroups,
   getMetrics: getAbMetrics,
   getMetricTemplates: getAbMetricTemplates,
+  getMetricPermissionRoleMatrix: getAbMetricPermissionRoleMatrix,
+  getMetricBindingSnapshots: getAbMetricBindingSnapshots,
+  createMetricTemplate: createAbMetricTemplate,
+  updateMetricTemplate: updateAbMetricTemplate,
+  deleteMetricTemplate: deleteAbMetricTemplate,
   getAlarmTasks: getAbAlarmTasks,
+  getAlarmTriggerRecords: getAbAlarmTriggerRecords,
   getReceiverGroups: getAbReceiverGroups,
+  saveAlarmTask: saveAbAlarmTask,
+  toggleAlarmTaskEnabled: toggleAbAlarmTaskEnabled,
+  deleteAlarmTask: deleteAbAlarmTask,
+  saveReceiverGroup: saveAbReceiverGroup,
+  deleteReceiverGroup: deleteAbReceiverGroup,
   getMustSeeMetricTrends: getAbMustSeeMetricTrends,
+  saveMetricDirectoryGroup: saveAbMetricDirectoryGroup,
+  saveMetricGroup: saveAbMetricGroup,
   createMetricGroup: createAbMetricGroup,
   copyMetricGroup: copyAbMetricGroup,
   mergeMetricGroups: mergeAbMetricGroups,
@@ -2523,6 +4476,7 @@ export const abTestingService = {
   queryMetricResults: queryAbMetricResults,
   getFunnelReport: getAbFunnelReport,
   getCohortReport: getAbCohortReport,
+  queryTemporaryRetention: queryAbTemporaryRetention,
   getHeatmapReport: getAbHeatmapReport,
   getMabReport: getAbMabReport,
   getSensitiveInsightTasks: getAbSensitiveInsightTasks,
@@ -2536,10 +4490,16 @@ export const abTestingService = {
   getWhitelistTests: getAbWhitelistTests,
   createFeatureFlag: createAbFeatureFlag,
   createFeatureVersion: createAbFeatureVersion,
+  disableFeatureVersion: disableAbFeatureVersion,
   publishFeatureVersion: publishAbFeatureVersion,
+  cancelFeaturePublish: cancelAbFeaturePublish,
   rollbackFeature: rollbackAbFeature,
   createWhitelistTest: createAbWhitelistTest,
+  terminateWhitelistTest: terminateAbWhitelistTest,
+  copyWhitelistTest: copyAbWhitelistTest,
+  deleteWhitelistTest: deleteAbWhitelistTest,
   changeFeatureLifecycle: changeAbFeatureLifecycle,
+  updateFeaturePermission: updateAbFeaturePermission,
   solidifyExperimentToFeature,
   decideFeature: decideAbFeature,
   getOperationLogs: getAbOperationLogs,

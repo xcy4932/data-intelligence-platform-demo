@@ -794,9 +794,84 @@ const router = createRouter({
           meta: { title: '指标管理', module: 'A/B 测试', abPage: 'metrics' },
         },
         {
+          path: 'ab-testing/metrics/:metricGroupId',
+          component: AbTestingWorkbenchView,
+          meta: { title: '指标组详情', module: 'A/B 测试', abPage: 'metrics' },
+        },
+        {
           path: 'ab-testing/features',
           component: AbTestingWorkbenchView,
-          meta: { title: '配置管理', module: 'A/B 测试', abPage: 'features' },
+          meta: { title: '配置管理', module: 'A/B 测试', abPage: 'features', featureSubPage: 'list' },
+        },
+        {
+          path: 'ab-testing/features/create',
+          component: AbTestingWorkbenchView,
+          meta: { title: '创建 Feature', module: 'A/B 测试', abPage: 'features', featureSubPage: 'create' },
+        },
+        {
+          path: 'ab-testing/features/solidify',
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验固化至 Feature', module: 'A/B 测试', abPage: 'features', featureSubPage: 'solidify' },
+        },
+        {
+          path: 'ab-testing/features/history',
+          component: AbTestingWorkbenchView,
+          meta: { title: '发布历史', module: 'A/B 测试', abPage: 'features', featureSubPage: 'history' },
+        },
+        {
+          path: 'ab-testing/features/lifecycle',
+          component: AbTestingWorkbenchView,
+          meta: { title: '生命周期管理', module: 'A/B 测试', abPage: 'features', featureSubPage: 'lifecycle' },
+        },
+        {
+          path: 'ab-testing/features/permissions',
+          component: AbTestingWorkbenchView,
+          meta: { title: 'Feature 权限管理', module: 'A/B 测试', abPage: 'features', featureSubPage: 'permissions' },
+        },
+        {
+          path: 'ab-testing/features/logs',
+          component: AbTestingWorkbenchView,
+          meta: { title: 'Feature 操作日志', module: 'A/B 测试', abPage: 'features', featureSubPage: 'logs' },
+        },
+        {
+          path: 'ab-testing/features/:featureId',
+          component: AbTestingWorkbenchView,
+          meta: { title: 'Feature 详情', module: 'A/B 测试', abPage: 'features', featureSubPage: 'detail' },
+        },
+        {
+          path: 'ab-testing/features/:featureId/versions',
+          component: AbTestingWorkbenchView,
+          meta: { title: 'Feature 版本管理', module: 'A/B 测试', abPage: 'features', featureSubPage: 'versions' },
+        },
+        {
+          path: 'ab-testing/features/:featureId/code',
+          component: AbTestingWorkbenchView,
+          meta: { title: 'Feature 嵌入代码', module: 'A/B 测试', abPage: 'features', featureSubPage: 'code' },
+        },
+        {
+          path: 'ab-testing/features/:featureId/whitelist',
+          component: AbTestingWorkbenchView,
+          meta: { title: '白名单测试', module: 'A/B 测试', abPage: 'features', featureSubPage: 'whitelist' },
+        },
+        {
+          path: 'ab-testing/features/:featureId/publish',
+          component: AbTestingWorkbenchView,
+          meta: { title: '发布 / 回滚 Feature', module: 'A/B 测试', abPage: 'features', featureSubPage: 'publish' },
+        },
+        {
+          path: 'ab-testing/features/:featureId/lifecycle',
+          component: AbTestingWorkbenchView,
+          meta: { title: '生命周期管理', module: 'A/B 测试', abPage: 'features', featureSubPage: 'lifecycle' },
+        },
+        {
+          path: 'ab-testing/features/:featureId/permissions',
+          component: AbTestingWorkbenchView,
+          meta: { title: 'Feature 权限管理', module: 'A/B 测试', abPage: 'features', featureSubPage: 'permissions' },
+        },
+        {
+          path: 'ab-testing/features/:featureId/logs',
+          component: AbTestingWorkbenchView,
+          meta: { title: 'Feature 操作日志', module: 'A/B 测试', abPage: 'features', featureSubPage: 'logs' },
         },
         {
           path: 'ab-testing/traffic',
@@ -811,7 +886,22 @@ const router = createRouter({
         {
           path: 'ab-testing/boards',
           component: AbTestingWorkbenchView,
-          meta: { title: '实验看板', module: 'A/B 测试', abPage: 'boards' },
+          meta: { title: '实验看板', module: 'A/B 测试', abPage: 'boards', boardSubPage: 'list' },
+        },
+        {
+          path: 'ab-testing/boards/create',
+          component: AbTestingWorkbenchView,
+          meta: { title: '创建实验看板', module: 'A/B 测试', abPage: 'boards', boardSubPage: 'edit' },
+        },
+        {
+          path: 'ab-testing/boards/:boardId/edit',
+          component: AbTestingWorkbenchView,
+          meta: { title: '编辑实验看板', module: 'A/B 测试', abPage: 'boards', boardSubPage: 'edit' },
+        },
+        {
+          path: 'ab-testing/boards/:boardId/view',
+          component: AbTestingWorkbenchView,
+          meta: { title: '查看实验看板', module: 'A/B 测试', abPage: 'boards', boardSubPage: 'view' },
         },
 
         // 监控中心

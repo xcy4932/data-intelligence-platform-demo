@@ -10,6 +10,7 @@ import type {
   AudienceConditionSource,
   AudienceOperator,
   AlarmTask,
+  AlarmTriggerRecord,
   BackendIntegrationStatus,
   BoardDiffResult,
   CohortReport,
@@ -42,7 +43,11 @@ import type {
   HitQueryTemplate,
   MabReport,
   Metric,
+  MetricBindingSnapshot,
+  MetricDirectoryGroup,
   MetricGroup,
+  MetricGroupEditorPayload,
+  MetricPermissionRoleMatrix,
   MetricStatisticResult,
   MetricTemplate,
   MutexDomain,
@@ -54,8 +59,11 @@ import type {
   PublishPlan,
   ReceiverGroup,
   ReportExportTask,
+  ReportFilter,
   SensitiveInsightTask,
   SmoothEffectTaskOperation,
+  TemporaryRetentionQueryPayload,
+  TemporaryRetentionQueryResult,
   TrafficLayer,
   TrendPoint,
   UniformDiversionTaskDetail,
@@ -80,10 +88,10 @@ const draftStorageKey = 'ab-testing:create-draft:v1'
 const selectionStorageKey = 'ab-testing:workspace-selection:v1'
 
 const appMembers = [
-  { id: 'user_growth_lin', name: '林哲', department: '增长运营团队' },
-  { id: 'user_data_zhou', name: '周婧', department: '商业化数据团队' },
-  { id: 'user_product_xu', name: '许澄', department: '产品体验团队' },
-  { id: 'user_qa_chen', name: '陈悦', department: '质量保障团队' },
+  { id: 'user_growth_lin', name: '林哲', department: '增长运营团队', email: 'linzhe@example.com', jobNo: 'G1001' },
+  { id: 'user_data_zhou', name: '周婧', department: '商业化数据团队', email: 'zhoujing@example.com', jobNo: 'D2008' },
+  { id: 'user_product_xu', name: '许澄', department: '产品体验团队', email: 'xucheng@example.com', jobNo: 'P3016' },
+  { id: 'user_qa_chen', name: '陈悦', department: '质量保障团队', email: 'chenyue@example.com', jobNo: 'Q4012' },
 ]
 
 const segmentOptions = [
@@ -417,6 +425,8 @@ function createDefaultExperimentDraft(): ExperimentDraft {
     tags: ['推荐', '新策略'],
     durationDays: 14,
     trafficRatio: 20,
+    coreMetricId: 'metric_ad_watch_rate',
+    focusMetricIds: ['metric_retention_d1'],
     metricIds: ['metric_ad_watch_rate', 'metric_retention_d1'],
     featureIds: [],
     testUserAudienceRequirement: 'IGNORE_AUDIENCE',
@@ -549,13 +559,17 @@ export const useAbTestingStore = defineStore('abTesting', () => {
   const experiments = ref<Experiment[]>([])
   const trafficLayers = ref<TrafficLayer[]>([])
   const mutexDomainGroups = ref<MutexDomainGroup[]>([])
+  const metricDirectoryGroups = ref<MetricDirectoryGroup[]>([])
   const metricGroups = ref<MetricGroup[]>([])
   const metrics = ref<Metric[]>([])
   const metricTemplates = ref<MetricTemplate[]>([])
+  const metricPermissionRoles = ref<MetricPermissionRoleMatrix[]>([])
+  const metricBindingSnapshots = ref<MetricBindingSnapshot[]>([])
   const experimentTemplateOptions = ref<ExperimentTemplate[]>([])
   const activeExperimentTemplateId = ref<EntityId | null>(null)
   const activeTemplateLockedFields = ref<ExperimentTemplate['lockedFields']>([])
   const alarmTasks = ref<AlarmTask[]>([])
+  const alarmTriggerRecords = ref<AlarmTriggerRecord[]>([])
   const receiverGroups = ref<ReceiverGroup[]>([])
   const mustSeeTrends = ref<MustSeeMetricTrend[]>([])
   const featureFlags = ref<FeatureFlag[]>([])
@@ -578,7 +592,7 @@ export const useAbTestingStore = defineStore('abTesting', () => {
   const selectedReportExperimentId = ref<EntityId>('exp_feed_strategy')
   const selectedFeatureId = ref<EntityId>('')
   const selectedMetricGroupId = ref<EntityId>('mg_ad_event')
-  const metricGroupMergeIds = ref<EntityId[]>(['mg_ad_event', 'mg_retention_guardrail'])
+  const metricGroupMergeIds = ref<EntityId[]>([])
   const metricGroupDraft = ref({
     appId: 'app_news',
     name: '新建实验指标组',
@@ -598,6 +612,7 @@ export const useAbTestingStore = defineStore('abTesting', () => {
   const mabReport = ref<MabReport | undefined>()
   const sensitiveTasks = ref<SensitiveInsightTask[]>([])
   const reportExportTasks = ref<ReportExportTask[]>([])
+  const temporaryRetentionQueries = ref<TemporaryRetentionQueryResult[]>([])
   const reportExporting = ref(false)
   const safeEditDraft = ref({
     name: '',
@@ -731,6 +746,7 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     key: 'new_user_gift_switch',
     name: '新用户礼包开关',
     description: '控制新用户是否展示首日礼包入口。',
+    imageUrl: '',
     terminalType: 'client',
     featureType: 'public',
     owners: ['user_growth_lin'],
@@ -741,6 +757,25 @@ export const useAbTestingStore = defineStore('abTesting', () => {
       { variantId: 'gift_on', name: '开启', value: true, description: '展示新用户礼包入口' },
     ],
     defaultVariantId: 'gift_off',
+    audienceRules: [
+      {
+        ruleId: 'rule_core_city',
+        name: '核心城市用户',
+        order: 1,
+        conditions: [{ fieldSource: 'user_property', fieldName: 'city', operator: 'in', value: ['北京', '上海'] }],
+        deliveryType: 'single_variant',
+        variantId: 'gift_on',
+      },
+    ],
+    defaultRule: {
+      ruleId: 'else',
+      name: '默认规则',
+      order: 999,
+      conditions: [],
+      deliveryType: 'single_variant',
+      variantId: 'gift_off',
+    },
+    publishTraffic: 0,
   })
   const featureVersionDraft = ref<FeatureVersionDraft>({
     variantType: 'string',
@@ -767,16 +802,21 @@ export const useAbTestingStore = defineStore('abTesting', () => {
       variantId: 'variant_a',
     },
     publishTraffic: 0,
+    expectedFeatureUpdatedAt: undefined,
   })
   const featurePublishDraft = ref<FeaturePublishRequest>({
     versionId: '',
     publishType: 'manual',
     publishTraffic: 30,
     scheduledAt: '',
+    scheduleSteps: [],
+    rollbackAt: null,
+    requireConfirmation: false,
     description: '按当前受众规则进行灰度发布。',
   })
   const whitelistDraft = ref<WhitelistTestDraft>({
     name: '新版本 QA 白名单',
+    versionMode: 'existing',
     versionId: '',
     expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
     ruleUserIds: { else: ['ssid_qa_001', 'ssid_qa_002'] },
@@ -786,7 +826,19 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     experimentId: 'exp_feed_strategy',
     featureKey: 'recommend_strategy_solidified',
     featureName: '推荐策略实验固化',
+    description: '由推荐策略实验固化生成，发布前可继续调整 Feature 基础信息。',
+    ownerIds: ['user_growth_lin'],
+    tags: ['实验固化'],
+    appId: 'app_growth',
+    terminalType: 'server',
+    featureType: 'public',
     winnerVariantId: 'var_feed_new',
+    variantRollouts: [
+      { experimentVariantId: 'var_feed_new', traffic: 100 },
+    ],
+    variantOverrides: [
+      { experimentVariantId: 'var_feed_new', name: '新策略' },
+    ],
     rolloutTraffic: 20,
   })
 
@@ -1130,6 +1182,9 @@ export const useAbTestingStore = defineStore('abTesting', () => {
       draftExperiment.value = {
         ...defaults,
         ...stored,
+        coreMetricId: stored.coreMetricId ?? stored.metricIds?.[0] ?? defaults.coreMetricId,
+        focusMetricIds: stored.focusMetricIds ?? (stored.metricIds ?? defaults.metricIds).filter((metricId) => metricId !== (stored.coreMetricId ?? stored.metricIds?.[0])),
+        metricIds: stored.metricIds ?? defaults.metricIds,
         variants: stored.variants?.length ? stored.variants : defaults.variants,
         paramSchemas: stored.paramSchemas?.length ? stored.paramSchemas : defaults.paramSchemas,
         diversionConfig: {
@@ -1321,6 +1376,7 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     const versionId = selectedCurrentFeatureVersion.value?.versionId ?? selectedLatestFeatureVersion.value?.versionId ?? ''
     featurePublishDraft.value.versionId = versionId
     whitelistDraft.value.versionId = versionId
+    featureVersionDraft.value.expectedFeatureUpdatedAt = selectedFeature.value?.updatedAt
     const defaultRuleId = selectedCurrentFeatureVersion.value?.defaultRule.ruleId ?? 'else'
     whitelistDraft.value.ruleUserIds = {
       [defaultRuleId]: whitelistUserIdsText.value
@@ -1342,11 +1398,15 @@ export const useAbTestingStore = defineStore('abTesting', () => {
         experimentPayload,
         trafficLayerPayload,
         mutexGroupPayload,
+        metricDirectoryGroupPayload,
         metricGroupPayload,
         metricPayload,
         metricTemplatePayload,
+        metricPermissionRolePayload,
+        metricBindingSnapshotPayload,
         experimentTemplatePayload,
         alarmPayload,
+        alarmTriggerPayload,
         receiverPayload,
         mustSeePayload,
         featurePayload,
@@ -1364,11 +1424,15 @@ export const useAbTestingStore = defineStore('abTesting', () => {
         abTestingService.getExperiments(),
         abTestingService.getTrafficLayers(),
         abTestingService.getMutexDomainGroups(),
+        abTestingService.getMetricDirectoryGroups(),
         abTestingService.getMetricGroups(),
         abTestingService.getMetrics(),
         abTestingService.getMetricTemplates(),
+        abTestingService.getMetricPermissionRoleMatrix(),
+        abTestingService.getMetricBindingSnapshots(),
         abTestingService.getExperimentTemplates(),
         abTestingService.getAlarmTasks(),
+        abTestingService.getAlarmTriggerRecords(),
         abTestingService.getReceiverGroups(),
         abTestingService.getMustSeeMetricTrends(),
         abTestingService.getFeatureFlags(),
@@ -1387,11 +1451,15 @@ export const useAbTestingStore = defineStore('abTesting', () => {
       experiments.value = experimentPayload
       trafficLayers.value = trafficLayerPayload
       mutexDomainGroups.value = mutexGroupPayload
+      metricDirectoryGroups.value = metricDirectoryGroupPayload
       metricGroups.value = metricGroupPayload
       metrics.value = metricPayload
       metricTemplates.value = metricTemplatePayload
+      metricPermissionRoles.value = metricPermissionRolePayload
+      metricBindingSnapshots.value = metricBindingSnapshotPayload
       experimentTemplateOptions.value = experimentTemplatePayload
       alarmTasks.value = alarmPayload
+      alarmTriggerRecords.value = alarmTriggerPayload
       receiverGroups.value = receiverPayload
       mustSeeTrends.value = mustSeePayload
       featureFlags.value = featurePayload
@@ -1570,6 +1638,10 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     const template = experimentTemplateOptions.value.find((item) => item.id === templateId)
     if (!template) return { success: false, message: '模板不存在' }
     const defaults = createDefaultExperimentDraft()
+    const coreMetricId =
+      template.metricIds.find((metricId) => metrics.value.find((metric) => metric.id === metricId)?.metricCategory !== 'funnel') ??
+      template.metricIds[0] ??
+      null
     draftExperiment.value = {
       ...defaults,
       type: template.type,
@@ -1578,6 +1650,8 @@ export const useAbTestingStore = defineStore('abTesting', () => {
       tags: [...template.tags],
       durationDays: template.defaultDurationDays,
       trafficRatio: template.defaultTrafficRatio,
+      coreMetricId,
+      focusMetricIds: template.metricIds.filter((metricId) => metricId !== coreMetricId),
       metricIds: [...template.metricIds],
       trafficConfig: {
         ...defaults.trafficConfig,
@@ -1594,8 +1668,15 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     return { success: true, message: '模板已应用，请补充实验基础信息' }
   }
 
-  async function loadReport(experimentId: EntityId) {
+  async function loadReport(experimentId: EntityId, filter?: Partial<ReportFilter>) {
     selectedReportExperimentId.value = experimentId
+    const experiment = experiments.value.find((item) => item.id === experimentId)
+    const experimentMetricIds = experiment?.metricIds ?? []
+    const experimentMetrics = experimentMetricIds
+      .map((metricId) => metrics.value.find((metric) => metric.id === metricId))
+      .filter((metric): metric is Metric => Boolean(metric))
+    const funnelMetricId = experimentMetrics.find((metric) => metric.metricCategory === 'funnel')?.id
+    const cohortMetricId = experimentMetrics.find((metric) => metric.metricCategory === 'retention')?.id
     const [
       overviewPayload,
       metricPayload,
@@ -1605,15 +1686,17 @@ export const useAbTestingStore = defineStore('abTesting', () => {
       mabPayload,
       sensitivePayload,
       exportTaskPayload,
+      metricSnapshotPayload,
     ] = await Promise.all([
         abTestingService.getReportOverview(experimentId),
-        abTestingService.queryMetricResults(experimentId),
-        abTestingService.getFunnelReport('metric_ad_funnel'),
-        abTestingService.getCohortReport('metric_retention_d1'),
-        abTestingService.getHeatmapReport(),
+        abTestingService.queryMetricResults(experimentId, filter),
+        funnelMetricId ? abTestingService.getFunnelReport(funnelMetricId) : Promise.resolve(undefined),
+        cohortMetricId ? abTestingService.getCohortReport(cohortMetricId) : Promise.resolve(undefined),
+        abTestingService.getHeatmapReport(experimentId),
         abTestingService.getMabReport(experimentId),
         abTestingService.getSensitiveInsightTasks(experimentId),
         abTestingService.getReportExportTasks(experimentId),
+        abTestingService.getMetricBindingSnapshots(experimentId),
       ])
     reportOverview.value = overviewPayload
     metricResults.value = metricPayload.metrics
@@ -1625,6 +1708,10 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     mabReport.value = mabPayload
     sensitiveTasks.value = sensitivePayload
     reportExportTasks.value = exportTaskPayload
+    metricBindingSnapshots.value = [
+      ...metricBindingSnapshots.value.filter((snapshot) => snapshot.experimentId !== experimentId),
+      ...metricSnapshotPayload,
+    ]
     persistSelections()
   }
 
@@ -2058,11 +2145,45 @@ export const useAbTestingStore = defineStore('abTesting', () => {
         draft.diversionConfig.decisionIdType !== 'custom' &&
         ['uid', 'user_id', 'device_id', 'did', 'uuid'].includes(draft.diversionConfig.decisionIdField.trim().toLowerCase())
       const smoothDuration = draft.trafficConfig.smoothDurationMinutes ?? 0
+      const coreMetric = draft.coreMetricId ? metrics.value.find((metric) => metric.id === draft.coreMetricId) : undefined
+      const focusMetrics = (draft.focusMetricIds ?? [])
+        .map((metricId) => metrics.value.find((metric) => metric.id === metricId))
+        .filter((metric): metric is Metric => Boolean(metric))
+      const allDraftMetrics = [...(coreMetric ? [coreMetric] : []), ...focusMetrics]
+      const hasOfflineDraftMetric =
+        allDraftMetrics.some((metric) => metric.status !== 'active') ||
+        (draft.focusMetricIds ?? []).some((metricId) => !metrics.value.some((metric) => metric.id === metricId && metric.status === 'active')) ||
+        (draft.coreMetricId ? !coreMetric || coreMetric.status !== 'active' : false)
+      const focusFunnelCount = focusMetrics.filter((metric) => metric.metricCategory === 'funnel').length
       items.push(
         {
-          level: draft.metricIds.length > 0 ? 'PASS' : 'ERROR',
+          level: draft.metricIds.length > 0 && Boolean(draft.coreMetricId) ? 'PASS' : 'ERROR',
           code: 'METRIC_SNAPSHOT',
-          message: draft.metricIds.length > 0 ? '已绑定指标快照' : '请至少选择一个实验指标',
+          message:
+            draft.metricIds.length > 0 && draft.coreMetricId
+              ? '已绑定核心指标和关注指标快照'
+              : '请至少选择一个核心指标，并可配置多个关注指标',
+          step,
+        },
+        {
+          level: coreMetric && coreMetric.status === 'active' && coreMetric.metricCategory !== 'funnel' ? 'PASS' : 'ERROR',
+          code: 'CORE_METRIC_RULE',
+          message:
+            coreMetric && coreMetric.status === 'active' && coreMetric.metricCategory !== 'funnel'
+              ? `核心指标已配置：${coreMetric.name}`
+              : '核心指标必须选择一个使用中的非漏斗指标',
+          step,
+        },
+        {
+          level: focusFunnelCount <= 1 ? 'PASS' : 'ERROR',
+          code: 'FOCUS_FUNNEL_LIMIT',
+          message: focusFunnelCount <= 1 ? '关注指标中漏斗指标数量合法' : '关注指标最多选择一个漏斗指标',
+          step,
+        },
+        {
+          level: hasOfflineDraftMetric ? 'ERROR' : 'PASS',
+          code: 'METRIC_STATUS_ACTIVE',
+          message: hasOfflineDraftMetric ? '已下线或不存在的指标不可用于发布' : '已选指标均为使用中状态',
           step,
         },
         {
@@ -2166,6 +2287,8 @@ export const useAbTestingStore = defineStore('abTesting', () => {
       diversionConfig: cloneDraftValue(defaults.diversionConfig),
       trafficConfig: cloneDraftValue(defaults.trafficConfig),
       specialConfig: cloneDraftValue(defaults.specialConfig),
+      coreMetricId: defaults.coreMetricId,
+      focusMetricIds: cloneDraftValue(defaults.focusMetricIds),
       metricIds: cloneDraftValue(defaults.metricIds),
       featureIds: [],
     }
@@ -3090,20 +3213,40 @@ export const useAbTestingStore = defineStore('abTesting', () => {
   }
 
   async function refreshMetricDomain() {
-    const [groupPayload, metricPayload, templatePayload, alarmPayload, receiverPayload, mustSeePayload, logPayload] =
+    const [
+      directoryGroupPayload,
+      groupPayload,
+      metricPayload,
+      templatePayload,
+      permissionRolePayload,
+      snapshotPayload,
+      alarmPayload,
+      alarmTriggerPayload,
+      receiverPayload,
+      mustSeePayload,
+      logPayload,
+    ] =
       await Promise.all([
+        abTestingService.getMetricDirectoryGroups(),
         abTestingService.getMetricGroups(),
         abTestingService.getMetrics(),
         abTestingService.getMetricTemplates(),
+        abTestingService.getMetricPermissionRoleMatrix(),
+        abTestingService.getMetricBindingSnapshots(),
         abTestingService.getAlarmTasks(),
+        abTestingService.getAlarmTriggerRecords(),
         abTestingService.getReceiverGroups(),
         abTestingService.getMustSeeMetricTrends(),
         abTestingService.getOperationLogs(),
       ])
+    metricDirectoryGroups.value = directoryGroupPayload
     metricGroups.value = groupPayload
     metrics.value = metricPayload
     metricTemplates.value = templatePayload
+    metricPermissionRoles.value = permissionRolePayload
+    metricBindingSnapshots.value = snapshotPayload
     alarmTasks.value = alarmPayload
+    alarmTriggerRecords.value = alarmTriggerPayload
     receiverGroups.value = receiverPayload
     mustSeeTrends.value = mustSeePayload
     operationLogs.value = logPayload
@@ -3119,6 +3262,19 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     return result
   }
 
+  async function saveMetricDirectoryGroup(payload: Pick<MetricDirectoryGroup, 'appId' | 'name' | 'description'> & { id?: EntityId }) {
+    const result = await abTestingService.saveMetricDirectoryGroup(payload)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function saveMetricGroup(payload: MetricGroupEditorPayload) {
+    const result = await abTestingService.saveMetricGroup(payload)
+    if (result.group) selectedMetricGroupId.value = result.group.id
+    await refreshMetricDomain()
+    return result
+  }
+
   async function copyMetricGroup(groupId = selectedMetricGroupId.value) {
     const result = await abTestingService.copyMetricGroup(groupId)
     if (result.group) selectedMetricGroupId.value = result.group.id
@@ -3126,8 +3282,15 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     return result
   }
 
-  async function mergeMetricGroups() {
-    const result = await abTestingService.mergeMetricGroups(metricGroupMergeIds.value)
+  async function mergeMetricGroups(options?: {
+    name?: string
+    description?: string
+    ownerId?: EntityId
+    permissionType?: MetricGroup['permissionType']
+    authorizedUserIds?: EntityId[]
+    metricNameOverrides?: Record<EntityId, string>
+  }) {
+    const result = await abTestingService.mergeMetricGroups(metricGroupMergeIds.value, options)
     if (result.group) selectedMetricGroupId.value = result.group.id
     await refreshMetricDomain()
     return result
@@ -3145,12 +3308,116 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     return result
   }
 
+  type AlarmTaskPayload = Pick<
+    AlarmTask,
+    'appId' | 'name' | 'description' | 'alarmType' | 'level' | 'interval' | 'enabled' | 'ruleRelation' | 'scene' | 'strategies' | 'notification'
+  > & { id?: EntityId }
+  type ReceiverGroupPayload = Pick<ReceiverGroup, 'appId' | 'name' | 'memberIds'> & { id?: EntityId }
+
+  async function saveAlarmTask(payload: AlarmTaskPayload) {
+    const result = await abTestingService.saveAlarmTask(payload)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function toggleAlarmTaskEnabled(taskId: EntityId, enabled: boolean) {
+    const result = await abTestingService.toggleAlarmTaskEnabled(taskId, enabled)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function deleteAlarmTask(taskId: EntityId) {
+    const result = await abTestingService.deleteAlarmTask(taskId)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function saveReceiverGroup(payload: ReceiverGroupPayload) {
+    const result = await abTestingService.saveReceiverGroup(payload)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function deleteReceiverGroup(groupId: EntityId) {
+    const result = await abTestingService.deleteReceiverGroup(groupId)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function queryTemporaryRetention(payload: TemporaryRetentionQueryPayload) {
+    const result = await abTestingService.queryTemporaryRetention(payload)
+    if (result.result) {
+      temporaryRetentionQueries.value = [
+        result.result,
+        ...temporaryRetentionQueries.value.filter((query) => query.id !== result.result?.id),
+      ]
+      operationLogs.value = await abTestingService.getOperationLogs()
+    }
+    return result
+  }
+
+  type MetricTemplatePayload = Pick<
+    MetricTemplate,
+    'appId' | 'name' | 'description' | 'ownerId' | 'templateType' | 'availableUserIds' | 'metricGroupIds'
+  >
+
+  async function createMetricTemplate(payload: MetricTemplatePayload) {
+    const result = await abTestingService.createMetricTemplate(payload)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function updateMetricTemplate(templateId: EntityId, payload: MetricTemplatePayload) {
+    const result = await abTestingService.updateMetricTemplate(templateId, payload)
+    await refreshMetricDomain()
+    return result
+  }
+
+  async function deleteMetricTemplate(templateId: EntityId) {
+    const result = await abTestingService.deleteMetricTemplate(templateId)
+    await refreshMetricDomain()
+    return result
+  }
+
+  function syncDraftMetricIdsFromRoles() {
+    draftExperiment.value.metricIds = [
+      ...new Set([
+        ...(draftExperiment.value.coreMetricId ? [draftExperiment.value.coreMetricId] : []),
+        ...draftExperiment.value.focusMetricIds,
+      ]),
+    ]
+    draftChecks.value = draftChecks.value.filter((item) => item.step !== 6)
+    persistDraft()
+  }
+
+  function ensureDraftMetricRoles() {
+    const activeMetrics = draftExperiment.value.metricIds
+      .map((metricId) => metrics.value.find((metric) => metric.id === metricId && metric.status === 'active'))
+      .filter((metric): metric is Metric => Boolean(metric))
+    if (!draftExperiment.value.coreMetricId) {
+      draftExperiment.value.coreMetricId = activeMetrics.find((metric) => metric.metricCategory !== 'funnel')?.id ?? null
+    }
+    draftExperiment.value.focusMetricIds = draftExperiment.value.metricIds.filter((metricId) => metricId !== draftExperiment.value.coreMetricId)
+    syncDraftMetricIdsFromRoles()
+  }
+
+  function applyMetricTemplateToDraft(templateId: EntityId) {
+    const template = metricTemplates.value.find((item) => item.id === templateId)
+    if (!template) return 0
+    const templateMetricIds = metricGroups.value
+      .filter((group) => template.metricGroupIds.includes(group.id) && group.status === 'active')
+      .flatMap((group) => group.metricIds)
+      .filter((metricId) => metrics.value.some((metric) => metric.id === metricId && metric.status === 'active'))
+    draftExperiment.value.metricIds = [...new Set([...draftExperiment.value.metricIds, ...templateMetricIds])]
+    ensureDraftMetricRoles()
+    return templateMetricIds.length
+  }
+
   function applyMustSeeMetricsToDraft() {
     draftExperiment.value.metricIds = [
       ...new Set([...draftExperiment.value.metricIds, ...mustSeeMetrics.value.map((metric) => metric.id)]),
     ]
-    draftChecks.value = []
-    persistDraft()
+    ensureDraftMetricRoles()
   }
 
   async function runTrafficCalculator() {
@@ -3200,6 +3467,14 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     const result = await abTestingService.createFeatureVersion(selectedFeatureId.value, featureVersionDraft.value)
     if (result.version) featurePublishDraft.value.versionId = result.version.versionId
     await refreshFeatureDomain()
+    syncSelectedFeatureDrafts()
+    return result
+  }
+
+  async function disableSelectedFeatureVersion(versionId = featurePublishDraft.value.versionId) {
+    if (!selectedFeatureId.value || !versionId) return { message: '请选择 Feature 版本' }
+    const result = await abTestingService.disableFeatureVersion(selectedFeatureId.value, versionId)
+    await refreshFeatureDomain()
     return result
   }
 
@@ -3217,6 +3492,16 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     return result
   }
 
+  async function cancelSelectedFeaturePublish() {
+    if (!selectedFeatureId.value || !featurePublishDraft.value.versionId) return { message: '请选择 Feature 版本' }
+    const result = await abTestingService.cancelFeaturePublish(
+      selectedFeatureId.value,
+      featurePublishDraft.value.versionId,
+    )
+    await refreshFeatureDomain()
+    return result
+  }
+
   async function rollbackSelectedFeature() {
     if (!selectedFeatureId.value) return { message: '请选择 Feature' }
     const result = await abTestingService.rollbackFeature(
@@ -3229,14 +3514,37 @@ export const useAbTestingStore = defineStore('abTesting', () => {
 
   async function createWhitelistTest() {
     if (!selectedFeatureId.value) return { message: '请选择 Feature' }
-    const ruleId = selectedCurrentFeatureVersion.value?.defaultRule.ruleId ?? 'else'
-    whitelistDraft.value.ruleUserIds = {
-      [ruleId]: whitelistUserIdsText.value
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean),
+    const hasConfiguredRuleUsers = Object.values(whitelistDraft.value.ruleUserIds ?? {}).some((userIds) =>
+      userIds.map((item) => item.trim()).filter(Boolean).length,
+    )
+    if (!hasConfiguredRuleUsers) {
+      const ruleId = selectedCurrentFeatureVersion.value?.defaultRule.ruleId ?? 'else'
+      whitelistDraft.value.ruleUserIds = {
+        [ruleId]: whitelistUserIdsText.value
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      }
     }
     const result = await abTestingService.createWhitelistTest(selectedFeatureId.value, whitelistDraft.value)
+    await refreshFeatureDomain()
+    return result
+  }
+
+  async function terminateWhitelistTest(testId: EntityId) {
+    const result = await abTestingService.terminateWhitelistTest(testId)
+    await refreshFeatureDomain()
+    return result
+  }
+
+  async function copyWhitelistTest(testId: EntityId) {
+    const result = await abTestingService.copyWhitelistTest(testId)
+    await refreshFeatureDomain()
+    return result
+  }
+
+  async function deleteWhitelistTest(testId: EntityId) {
+    const result = await abTestingService.deleteWhitelistTest(testId)
     await refreshFeatureDomain()
     return result
   }
@@ -3244,6 +3552,13 @@ export const useAbTestingStore = defineStore('abTesting', () => {
   async function changeSelectedFeatureLifecycle(action: FeatureLifecycleAction) {
     if (!selectedFeatureId.value) return { message: '请选择 Feature' }
     const result = await abTestingService.changeFeatureLifecycle(selectedFeatureId.value, action)
+    await refreshFeatureDomain()
+    return result
+  }
+
+  async function updateSelectedFeaturePermission(featureType: FeatureFlag['featureType']) {
+    if (!selectedFeatureId.value) return { message: '请选择 Feature' }
+    const result = await abTestingService.updateFeaturePermission(selectedFeatureId.value, featureType)
     await refreshFeatureDomain()
     return result
   }
@@ -3601,10 +3916,14 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     experiments,
     trafficLayers,
     mutexDomainGroups,
+    metricDirectoryGroups,
     metricGroups,
     metrics,
     metricTemplates,
+    metricPermissionRoles,
+    metricBindingSnapshots,
     alarmTasks,
+    alarmTriggerRecords,
     receiverGroups,
     mustSeeTrends,
     featureFlags,
@@ -3639,6 +3958,7 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     mabReport,
     sensitiveTasks,
     reportExportTasks,
+    temporaryRetentionQueries,
     reportExporting,
     safeEditDraft,
     scaleTrafficDraft,
@@ -3806,19 +4126,38 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     submitDraftForDebug,
     refreshMetricDomain,
     createMetricGroup,
+    saveMetricDirectoryGroup,
+    saveMetricGroup,
     copyMetricGroup,
     mergeMetricGroups,
     offlineMetricGroup,
     toggleMetricMustSee,
+    saveAlarmTask,
+    toggleAlarmTaskEnabled,
+    deleteAlarmTask,
+    saveReceiverGroup,
+    deleteReceiverGroup,
+    queryTemporaryRetention,
+    createMetricTemplate,
+    updateMetricTemplate,
+    deleteMetricTemplate,
+    applyMetricTemplateToDraft,
+    syncDraftMetricIdsFromRoles,
     applyMustSeeMetricsToDraft,
     runTrafficCalculator,
     refreshFeatureDomain,
     createFeatureFlag,
     createFeatureVersion,
+    disableSelectedFeatureVersion,
     publishSelectedFeatureVersion,
+    cancelSelectedFeaturePublish,
     rollbackSelectedFeature,
     createWhitelistTest,
+    terminateWhitelistTest,
+    copyWhitelistTest,
+    deleteWhitelistTest,
     changeSelectedFeatureLifecycle,
+    updateSelectedFeaturePermission,
     solidifyExperimentToFeatureFromDraft,
     runFeatureDecision,
     applyHitQueryTemplate,

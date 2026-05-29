@@ -4,6 +4,8 @@ import { test } from 'node:test'
 import {
   calculateSmoothTraffic,
   calculateTrafficRecommendation,
+  canTransitionFeaturePublishStatus,
+  canTransitionFeatureStatus,
   canUseAbAction,
   evaluateFeatureDecision,
   getAbPermissionLevel,
@@ -86,6 +88,28 @@ test('audits permission levels and action requirements', () => {
   assert.equal(canUseAbAction(context, 'export_report', publicLevel).allowed, true)
 })
 
+test('guards feature and publish state transitions', () => {
+  assert.equal(canTransitionFeatureStatus('enabled', 'disabled'), true)
+  assert.equal(canTransitionFeatureStatus('disabled', 'enabled'), true)
+  assert.equal(canTransitionFeatureStatus('disabled', 'deleted'), true)
+  assert.equal(canTransitionFeatureStatus('enabled', 'deleted'), false)
+  assert.equal(canTransitionFeatureStatus('deleted', 'enabled'), false)
+
+  assert.equal(canTransitionFeaturePublishStatus('unpublished', 'pending_publish'), true)
+  assert.equal(canTransitionFeaturePublishStatus('unpublished', 'gray'), true)
+  assert.equal(canTransitionFeaturePublishStatus('unpublished', 'full'), true)
+  assert.equal(canTransitionFeaturePublishStatus('pending_publish', 'gray'), true)
+  assert.equal(canTransitionFeaturePublishStatus('pending_publish', 'canceled'), true)
+  assert.equal(canTransitionFeaturePublishStatus('gray', 'full'), true)
+  assert.equal(canTransitionFeaturePublishStatus('gray', 'rolled_back'), true)
+  assert.equal(canTransitionFeaturePublishStatus('publish_confirm', 'gray'), true)
+  assert.equal(canTransitionFeaturePublishStatus('publish_confirm', 'rolled_back'), true)
+  assert.equal(canTransitionFeaturePublishStatus('full', 'rolled_back'), true)
+  assert.equal(canTransitionFeaturePublishStatus('rolled_back', 'disabled'), true)
+  assert.equal(canTransitionFeaturePublishStatus('full', 'gray'), false)
+  assert.equal(canTransitionFeaturePublishStatus('disabled', 'full'), false)
+})
+
 test('evaluates feature decisions with whitelist, experiment, disabled and rule precedence', () => {
   const feature = {
     featureId: 'feat_login',
@@ -155,7 +179,73 @@ test('evaluates feature decisions with whitelist, experiment, disabled and rule 
     'whitelist',
   )
   assert.equal(
+    evaluateFeatureDecision({ feature, version, userId: 'user_1', context: {}, inWhitelist: true, inExperiment: true, localDefault: 'local' }).decisionSource,
+    'whitelist',
+  )
+  assert.equal(
     evaluateFeatureDecision({ feature, version, userId: 'user_1', context: {}, inExperiment: true, localDefault: 'local' }).decisionSource,
     'experiment',
+  )
+  assert.equal(
+    evaluateFeatureDecision({
+      feature,
+      version: { ...version, publishTraffic: 0 },
+      userId: 'user_1',
+      context: { os: 'Android' },
+      localDefault: 'local',
+    }).decisionReason,
+    'traffic_not_hit',
+  )
+  assert.equal(
+    evaluateFeatureDecision({
+      feature,
+      version: {
+        ...version,
+        audienceRules: [
+          {
+            ruleId: 'rule_custom',
+            name: '自定义变量',
+            order: 1,
+            conditions: [{ fieldSource: 'custom_variable', fieldName: 'scene', operator: 'neq', value: 'blocked' }],
+            deliveryType: 'single_variant',
+            variantId: 'qq',
+          },
+        ],
+      },
+      userId: 'user_1',
+      context: {},
+      localDefault: 'local',
+    }).value,
+    'wechat',
+  )
+  assert.equal(
+    evaluateFeatureDecision({
+      feature,
+      version: {
+        ...version,
+        audienceRules: [
+          {
+            ruleId: 'rule_first',
+            name: '第一条命中规则',
+            order: 1,
+            conditions: [{ fieldSource: 'device_property', fieldName: 'os', operator: 'eq', value: 'Android' }],
+            deliveryType: 'single_variant',
+            variantId: 'qq',
+          },
+          {
+            ruleId: 'rule_second',
+            name: '第二条也命中但不应继续判断',
+            order: 2,
+            conditions: [{ fieldSource: 'device_property', fieldName: 'os', operator: 'eq', value: 'Android' }],
+            deliveryType: 'single_variant',
+            variantId: 'wechat',
+          },
+        ],
+      },
+      userId: 'user_1',
+      context: { os: 'Android' },
+      localDefault: 'local',
+    }).ruleId,
+    'rule_first',
   )
 })

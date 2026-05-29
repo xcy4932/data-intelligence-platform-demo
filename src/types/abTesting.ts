@@ -71,6 +71,8 @@ export interface Experiment {
   tags: string[]
   durationDays: number
   trafficRatio: number
+  coreMetricId?: EntityId | null
+  focusMetricIds?: EntityId[]
   metricIds: EntityId[]
   featureIds: EntityId[]
   startedAt?: ISODateTimeString
@@ -502,6 +504,8 @@ export interface ExperimentDraft {
   tags: string[]
   durationDays: number
   trafficRatio: number
+  coreMetricId?: EntityId | null
+  focusMetricIds: EntityId[]
   metricIds: EntityId[]
   featureIds: EntityId[]
   variants: ExperimentDraftVariant[]
@@ -551,6 +555,16 @@ export type MetricPermissionType = 'public' | 'private'
 export type MetricRole = 'core' | 'focus' | 'must_see'
 export type MetricNumberFormat = 'number' | 'percent'
 
+export interface MetricDirectoryGroup {
+  id: EntityId
+  appId: EntityId
+  name: string
+  description: string
+  createdBy: EntityId
+  createdAt: ISODateTimeString
+  updatedAt: ISODateTimeString
+}
+
 export interface MetricGroup {
   id: EntityId
   appId: EntityId
@@ -592,12 +606,33 @@ export interface Metric {
   updatedAt: ISODateTimeString
 }
 
+export interface MetricGroupEditorPayload {
+  mode: 'create' | 'edit' | 'copy'
+  groupId?: EntityId
+  appId: EntityId
+  name: string
+  description: string
+  type: MetricGroupType
+  ownerId: EntityId
+  permissionType: MetricPermissionType
+  authorizedUserIds: EntityId[]
+  directoryGroupId?: EntityId
+  metrics: Metric[]
+}
+
 export interface MetricFilter {
   id: EntityId
   propertyId: string
   propertySource: 'event' | 'public' | 'user' | 'custom'
   operator: string
   value?: unknown
+}
+
+export interface MetricFilterGroup {
+  id: EntityId
+  relation: 'AND' | 'OR'
+  conditions: MetricFilter[]
+  groups: MetricFilterGroup[]
 }
 
 export interface EventMetricEvent {
@@ -620,6 +655,7 @@ export interface EventMetricEvent {
     | 'count_distinct'
   propertyId?: string | null
   filters: MetricFilter[]
+  filterTree?: MetricFilterGroup
   aggregationFilter?: {
     enabled: boolean
     dimensionType: 'user' | 'event_property' | 'public_property' | 'custom_property'
@@ -660,6 +696,7 @@ export interface FunnelMetricDefinition {
   }
   steps: EventMetricEvent[]
   globalFilters: MetricFilter[]
+  globalFilterTree?: MetricFilterGroup
 }
 
 export interface MetricTemplate {
@@ -673,6 +710,53 @@ export interface MetricTemplate {
   metricGroupIds: EntityId[]
   createdAt: ISODateTimeString
   updatedAt: ISODateTimeString
+}
+
+export type MetricPermissionCapability =
+  | 'list'
+  | 'view_detail'
+  | 'view_statistic'
+  | 'use_in_experiment'
+  | 'edit'
+  | 'offline'
+  | 'copy'
+  | 'grant'
+  | 'set_must_see'
+  | 'manage_template'
+  | 'manage_alarm'
+
+export interface MetricPermissionRoleMatrix {
+  id: EntityId
+  role: 'SUPER_ADMIN' | 'APP_ADMIN' | 'METRIC_OWNER' | 'TEMPLATE_OWNER' | 'MEMBER' | 'AUTHORIZED_USER'
+  roleName: string
+  description: string
+  capabilities: MetricPermissionCapability[]
+  updatedAt: ISODateTimeString
+}
+
+export interface MetricBindingSnapshot {
+  id: EntityId
+  experimentId: EntityId
+  metricId: EntityId
+  metricGroupId: EntityId
+  metricName: string
+  metricGroupName: string
+  metricRole: 'core' | 'focus'
+  metricCategory: MetricGroupType
+  definition: Metric['definition']
+  numberFormat: Metric['numberFormat']
+  flexibleValues: Array<{
+    propertyId: string
+    propertyName: string
+    scope: string
+    operator?: string
+    value?: unknown
+    source: 'experiment_value' | 'metric_default'
+  }>
+  statusAtBinding: MetricGroupStatus
+  snapshotVersion: number
+  source: 'experiment_create' | 'experiment_edit' | 'metric_edit'
+  capturedAt: ISODateTimeString
 }
 
 export interface AlarmTask {
@@ -692,6 +776,7 @@ export interface AlarmTask {
   strategies: Array<{
     id: EntityId
     metricId: EntityId
+    strategyType?: 'absolute' | 'yoy' | 'mom' | 'control'
     compareTo?: 'control'
     direction: 'increase' | 'decrease' | 'any'
     thresholdPercent: number
@@ -706,6 +791,30 @@ export interface AlarmTask {
   triggerCount: number
   createdBy: EntityId
   createdAt: ISODateTimeString
+}
+
+export interface AlarmTriggerRecord {
+  id: EntityId
+  alarmTaskId: EntityId
+  alarmTaskName: string
+  alarmType: AlarmTask['alarmType']
+  experimentId?: EntityId
+  dashboardId?: EntityId
+  metricId: EntityId
+  metricName: string
+  strategyType: NonNullable<AlarmTask['strategies'][number]['strategyType']>
+  level: AlarmTask['level']
+  triggeredAt: ISODateTimeString
+  metricValue: number
+  baselineValue?: number
+  diffPercent: number
+  thresholdPercent: number
+  requireSignificance: boolean
+  pValue?: number
+  status: 'sent' | 'suppressed' | 'failed'
+  notificationChannels: AlarmTask['notification']['channels']
+  receiverGroupNames: string[]
+  message: string
 }
 
 export interface ReceiverGroup {
@@ -752,6 +861,7 @@ export interface FeatureFlag {
   key: string
   name: string
   description: string
+  imageUrl?: string
   terminalType: 'client' | 'server'
   featureType: 'public' | 'private'
   status: FeatureStatus
@@ -809,6 +919,7 @@ export interface PublishPlan {
   featureId: EntityId
   versionId: EntityId
   publishType: 'manual' | 'scheduled'
+  status?: 'pending' | 'running' | 'completed' | 'canceled' | 'rolled_back' | 'failed'
   description: string
   steps: Array<{
     stepNo: number
@@ -823,9 +934,12 @@ export interface WhitelistTest {
   id: EntityId
   featureId: EntityId
   name: string
+  versionMode?: 'existing' | 'custom'
   versionId?: EntityId
   status: 'active' | 'expired' | 'terminated'
   expiresAt: ISODateTimeString
+  customVariants?: FeatureVariant[]
+  customAudienceRules?: AudienceRule[]
   ruleUserIds: Record<EntityId, string[]>
   createdBy: EntityId
   createdAt: ISODateTimeString
@@ -856,6 +970,7 @@ export interface FeatureFlagDraft {
   key: string
   name: string
   description: string
+  imageUrl?: string
   terminalType: FeatureFlag['terminalType']
   featureType: FeatureFlag['featureType']
   owners: EntityId[]
@@ -863,6 +978,9 @@ export interface FeatureFlagDraft {
   variantType: FeatureVariantType
   variants: FeatureVariant[]
   defaultVariantId?: EntityId
+  audienceRules?: AudienceRule[]
+  defaultRule?: AudienceRule
+  publishTraffic?: number
 }
 
 export interface FeatureVersionDraft {
@@ -871,6 +989,7 @@ export interface FeatureVersionDraft {
   audienceRules: AudienceRule[]
   defaultRule: AudienceRule
   publishTraffic: number
+  expectedFeatureUpdatedAt?: ISODateTimeString
 }
 
 export interface FeaturePublishRequest {
@@ -878,13 +997,19 @@ export interface FeaturePublishRequest {
   publishType: PublishPlan['publishType']
   publishTraffic: number
   scheduledAt?: ISODateTimeString
+  scheduleSteps?: PublishPlan['steps']
+  rollbackAt?: ISODateTimeString | null
+  requireConfirmation?: boolean
   description: string
 }
 
 export interface WhitelistTestDraft {
   name: string
+  versionMode?: WhitelistTest['versionMode']
   versionId?: EntityId
   expiresAt: ISODateTimeString
+  customVariants?: FeatureVariant[]
+  customAudienceRules?: AudienceRule[]
   ruleUserIds: Record<EntityId, string[]>
 }
 
@@ -894,7 +1019,15 @@ export interface FeatureSolidifyRequest {
   experimentId: EntityId
   featureKey: string
   featureName: string
+  description?: string
+  ownerIds?: EntityId[]
+  tags?: string[]
+  appId?: EntityId
+  terminalType?: FeatureFlag['terminalType']
+  featureType?: FeatureFlag['featureType']
   winnerVariantId: EntityId
+  variantRollouts?: Array<{ experimentVariantId: EntityId; traffic: number }>
+  variantOverrides?: Array<{ experimentVariantId: EntityId; name: string; description?: string }>
   rolloutTraffic: number
 }
 
@@ -1155,6 +1288,34 @@ export interface CohortReport {
   }>
 }
 
+export interface TemporaryRetentionQueryPayload {
+  experimentId: EntityId
+  metricId?: EntityId | null
+  startEventId: EntityId
+  returnEventId: EntityId
+  startDate: ISODateString
+  endDate: ISODateString
+  startFilterTree: MetricFilterGroup
+  returnFilterTree: MetricFilterGroup
+}
+
+export interface TemporaryRetentionQueryResult extends CohortReport {
+  id: EntityId
+  experimentId: EntityId
+  sourceMetricId?: EntityId | null
+  startEventId: EntityId
+  returnEventId: EntityId
+  startFilterTree: MetricFilterGroup
+  returnFilterTree: MetricFilterGroup
+  queriedAt: ISODateTimeString
+  summary: {
+    startFilterCount: number
+    returnFilterCount: number
+    versionCount: number
+    cohortCount: number
+  }
+}
+
 export interface HeatmapReport {
   pageUrl: string
   type: 'click' | 'element'
@@ -1222,7 +1383,7 @@ export interface SensitiveInsightTask {
 export interface ReportExportTask {
   id: EntityId
   experimentId: EntityId
-  reportType: 'overview' | 'metrics' | 'funnel' | 'cohort' | 'heatmap' | 'mab' | 'sensitive'
+  reportType: 'overview' | 'metrics' | 'funnel' | 'cohort' | 'heatmap' | 'mab' | 'sensitive' | 'group_users'
   fileName: string
   status: 'queued' | 'running' | 'success' | 'failed' | 'canceled'
   progress: number
