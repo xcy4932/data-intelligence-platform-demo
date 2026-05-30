@@ -14,6 +14,9 @@ AI_REPAIR_SCRIPT="./scripts/codex/repair-current-slice-after-ai-review.sh"
 VALIDATE_SCRIPT="./scripts/codex/validate-prd-md-consistency.sh"
 SCOPE_VALIDATE_SCRIPT="./scripts/codex/validate-slice-file-scope.sh"
 ARCHIVE_REVIEW_SCRIPT="./scripts/codex/archive-slice-review.sh"
+SYNC_STATE_SCRIPT="./scripts/codex/sync-pipeline-state.sh"
+UI_CHECK_SCRIPT="./scripts/codex/generate-ui-manual-check.sh"
+COMMIT_MESSAGE_SCRIPT="./scripts/codex/generate-commit-message.sh"
 
 mkdir -p "$LOG_DIR"
 
@@ -32,7 +35,7 @@ if [ ! -f "$MASTER_QUEUE_FILE" ]; then
   exit 1
 fi
 
-for script in "$RUN_SLICE_SCRIPT" "$AI_REVIEW_SCRIPT" "$AI_RELEASE_SCRIPT" "$AI_REPAIR_SCRIPT" "$VALIDATE_SCRIPT" "$SCOPE_VALIDATE_SCRIPT" "$ARCHIVE_REVIEW_SCRIPT"; do
+for script in "$RUN_SLICE_SCRIPT" "$AI_REVIEW_SCRIPT" "$AI_RELEASE_SCRIPT" "$AI_REPAIR_SCRIPT" "$VALIDATE_SCRIPT" "$SCOPE_VALIDATE_SCRIPT" "$ARCHIVE_REVIEW_SCRIPT" "$SYNC_STATE_SCRIPT" "$UI_CHECK_SCRIPT" "$COMMIT_MESSAGE_SCRIPT"; do
   if [ ! -x "$script" ]; then
     echo "ERROR: $script is not executable or not found."
     echo "Run: chmod +x $script"
@@ -111,9 +114,17 @@ commit_current_iteration() {
   fi
 
   validate_context
+  "$SYNC_STATE_SCRIPT"
+
+  local commit_message
+  commit_message="$("$COMMIT_MESSAGE_SCRIPT" || true)"
+
+  if [ -z "$commit_message" ]; then
+    commit_message="codex: complete PRD slice auto iteration $iteration - $slice_name"
+  fi
 
   git add .
-  git commit -m "codex: complete PRD slice auto iteration $iteration - $slice_name" || {
+  git commit -m "$commit_message" || {
     echo "Git commit failed. Stop auto loop."
     exit 1
   }
@@ -373,7 +384,11 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     echo "$CURRENT_STATUS_AFTER_RELEASE"
     echo ""
 
-    "$ARCHIVE_REVIEW_SCRIPT"
+    "$UI_CHECK_SCRIPT"
+
+    "$UI_CHECK_SCRIPT"
+
+  "$ARCHIVE_REVIEW_SCRIPT"
 
     commit_current_iteration "$i" "$CURRENT_SLICE_BEFORE"
 

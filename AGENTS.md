@@ -528,3 +528,65 @@ Non-auto-fixable Blocking examples:
 - future slice implementation is required;
 - unrelated files were changed;
 - product judgment is required.
+
+## Pipeline State Rule
+
+Automation should keep a machine-readable state file at:
+
+`docs/implementation/PIPELINE_STATE.json`
+
+The state file mirrors CURRENT_TASK.md and records:
+- current PRD
+- current module
+- implementation directory
+- current slice
+- phase
+- status
+- updated_at
+
+Markdown files remain the human-readable source, but PIPELINE_STATE.json improves script observability.
+
+## Pipeline Dry Run Rule
+
+Before long automation runs, the user may run dry-run mode.
+
+Dry-run must not modify files.
+
+Dry-run should report:
+- current PRD
+- current implementation directory
+- current slice
+- current status
+- expected next phase
+- latest self-review
+- latest AI review
+- latest mapping review
+- git status
+- md consistency result
+- suggested next command
+
+## Manual UI Check Rule
+
+For UI-related slices, automation should generate a manual UI check file under:
+
+`docs/implementation/<current-prd>/ui-checks/`
+
+The file should list:
+- suggested routes to inspect
+- user roles/scenarios to test
+- UI states to inspect
+- layout/UX checklist
+
+This does not block automation by itself, but it gives the user a clear visual inspection path.
+
+## Semantic Commit Message Rule
+
+Automation should prefer semantic commit messages.
+
+Recommended format:
+- `feat(prd-001): complete OIC-002 组织与身份概览`
+- `fix(prd-001): repair OIC-001H License refresh topic`
+- `docs(prd-002): map 开放平台与集成中心`
+- `chore: update PRD automation scripts`
+
+Commit messages should include the PRD id and slice id when available.

@@ -5,6 +5,7 @@ MAX_PIPELINE_ROUNDS="${1:-20}"
 DEV_ITERATIONS_PER_ROUND="${2:-5}"
 MAPPING_REFINE_ROUNDS="${3:-3}"
 DEV_REPAIR_ROUNDS="${4:-2}"
+DRY_RUN="${5:-No}"
 
 CURRENT_TASK_FILE="docs/implementation/CURRENT_TASK.md"
 MASTER_QUEUE_FILE="docs/implementation/MASTER_PRD_QUEUE.md"
@@ -14,6 +15,8 @@ REVIEW_REFINE_MAPPING_SCRIPT="./scripts/codex/review-and-refine-prd-mapping.sh"
 RUN_DEV_SCRIPT="./scripts/codex/run-prd-auto-loop-with-ai-review.sh"
 VALIDATE_SCRIPT="./scripts/codex/validate-prd-md-consistency.sh"
 FINAL_VERIFY_SCRIPT="./scripts/codex/run-prd-final-verification.sh"
+SYNC_STATE_SCRIPT="./scripts/codex/sync-pipeline-state.sh"
+DRY_RUN_SCRIPT="./scripts/codex/prd-pipeline-dry-run.sh"
 
 if [ ! -f "AGENTS.md" ]; then
   echo "ERROR: AGENTS.md not found. Please run this script from project root."
@@ -25,7 +28,7 @@ if [ ! -f "$MASTER_QUEUE_FILE" ]; then
   exit 1
 fi
 
-for script in "$RUN_MAPPING_SCRIPT" "$REVIEW_REFINE_MAPPING_SCRIPT" "$RUN_DEV_SCRIPT" "$VALIDATE_SCRIPT" "$FINAL_VERIFY_SCRIPT"; do
+for script in "$RUN_MAPPING_SCRIPT" "$REVIEW_REFINE_MAPPING_SCRIPT" "$RUN_DEV_SCRIPT" "$VALIDATE_SCRIPT" "$FINAL_VERIFY_SCRIPT" "$SYNC_STATE_SCRIPT" "$DRY_RUN_SCRIPT"; do
   if [ ! -x "$script" ]; then
     echo "ERROR: $script is not executable or not found."
     echo "Run: chmod +x $script"
@@ -36,6 +39,11 @@ done
 if ! command -v codex >/dev/null 2>&1; then
   echo "ERROR: codex command not found."
   exit 1
+fi
+
+if [ "$DRY_RUN" = "--dry-run" ] || [ "$DRY_RUN" = "dry-run" ] || [ "$DRY_RUN" = "DryRun" ]; then
+  "$DRY_RUN_SCRIPT"
+  exit 0
 fi
 
 get_task_field() {
@@ -284,6 +292,8 @@ commit_if_changed() {
     echo "No changes to commit."
     return 0
   fi
+
+  "$SYNC_STATE_SCRIPT" || true
 
   git add .
   git commit -m "$message"

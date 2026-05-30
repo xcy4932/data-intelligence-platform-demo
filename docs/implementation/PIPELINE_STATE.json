@@ -1,0 +1,17 @@
+{
+  "current_prd": "001",
+  "current_module": "组织与身份中心",
+  "implementation_dir": "docs/implementation/001_组织与身份中心",
+  "current_slice": "OIC-002",
+  "current_slice_name": "组织与身份概览",
+  "phase": "development_ready",
+  "status": "Ready",
+  "current_task_file": "docs/implementation/CURRENT_TASK.md",
+  "master_queue_file": "docs/implementation/MASTER_PRD_QUEUE.md",
+  "current_slice_file": "docs/implementation/001_组织与身份中心/CURRENT_SLICE.md",
+  "progress_file": "docs/implementation/001_组织与身份中心/PROGRESS.md",
+  "implementation_map_file": "docs/implementation/001_组织与身份中心/IMPLEMENTATION_MAP.md",
+  "acceptance_checklist_file": "docs/implementation/001_组织与身份中心/ACCEPTANCE_CHECKLIST.md",
+  "review_file": "docs/implementation/001_组织与身份中心/SLICE_SELF_REVIEW.md",
+  "updated_at": "2026-05-30T15:03:06Z"
+}
