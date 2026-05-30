@@ -465,3 +465,66 @@ A slice can be automatically released only when:
 - AI_REVIEW_BLOCKING_COUNT: 0
 
 If the repair-review loop exceeds the configured maximum rounds and the slice is still not releasable, automation must stop.
+
+## PRD Final Verification Rule
+
+When all slices of a PRD appear complete, Codex must not immediately move to the next PRD.
+
+Before marking a PRD as Verified, Codex must run a final verification phase.
+
+Final verification must check:
+- all slices in IMPLEMENTATION_MAP.md are Done;
+- ACCEPTANCE_CHECKLIST.md slice checklist is complete;
+- PRD final acceptance mapping is complete;
+- route/menu entries exist;
+- required pages exist;
+- required permission behavior is covered;
+- required loading, empty, filtered-empty, error, 403, 404, disabled, success, failure, and retry states are covered;
+- PRD-required audit logs are covered;
+- PRD-required refresh/data consistency behavior is covered;
+- type-check and build pass.
+
+Only after final verification passes may MASTER_PRD_QUEUE.md mark the PRD as Verified.
+
+## Slice Allowed Files Rule
+
+Each CURRENT_SLICE.md should include an `Allowed Files` section.
+
+If a slice modifies files outside the allowed scope, automation must stop unless the change is explicitly justified by the current slice and added to Allowed Files.
+
+Unrelated file changes must not be committed.
+
+## Slice Review Snapshot Rule
+
+After each slice completes or is released, automation must archive SLICE_SELF_REVIEW.md into:
+
+`docs/implementation/<current-prd>/reviews/<slice-id>_<timestamp>.md`
+
+The snapshot preserves why the slice was released and which checks passed.
+
+## AI Blocking Classification Rule
+
+AI review must classify Blocking issues into:
+- Auto-fixable Blocking
+- Non-auto-fixable Blocking
+
+Only Auto-fixable Blocking issues may enter the repair loop.
+
+Non-auto-fixable Blocking issues must stop automation.
+
+Auto-fixable Blocking examples:
+- missing state handling inside current slice;
+- missing validation inside current slice;
+- missing refresh topic inside current slice;
+- missing audit log inside current slice;
+- current-slice type-check/build error;
+- current-slice document inconsistency.
+
+Non-auto-fixable Blocking examples:
+- slice boundary is wrong;
+- PRD is ambiguous;
+- re-slicing is required;
+- broad architecture change is required;
+- future slice implementation is required;
+- unrelated files were changed;
+- product judgment is required.

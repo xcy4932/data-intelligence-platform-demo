@@ -33,6 +33,18 @@
 - `src/services/organizationIdentityService.ts`
 - `src/types/organizationIdentity.ts`
 
+
+## Allowed Files
+
+- `src/views/organization-identity/OrganizationOverviewView.vue`
+- `src/components/business/organization-identity/`
+- `src/services/organizationIdentityService.ts`
+- `src/types/organizationIdentity.ts`
+- `src/mock/organizationIdentity.ts`
+- `docs/implementation/001_组织与身份中心/`
+- `docs/implementation/CURRENT_TASK.md`
+- `docs/implementation/MASTER_PRD_QUEUE.md`
+
 ## 验收标准
 
 - [ ] 8 类统计卡按配置显示或隐藏。

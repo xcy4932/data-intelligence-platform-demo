@@ -13,6 +13,7 @@ RUN_MAPPING_SCRIPT="./scripts/codex/run-prd-mapping-only.sh"
 REVIEW_REFINE_MAPPING_SCRIPT="./scripts/codex/review-and-refine-prd-mapping.sh"
 RUN_DEV_SCRIPT="./scripts/codex/run-prd-auto-loop-with-ai-review.sh"
 VALIDATE_SCRIPT="./scripts/codex/validate-prd-md-consistency.sh"
+FINAL_VERIFY_SCRIPT="./scripts/codex/run-prd-final-verification.sh"
 
 if [ ! -f "AGENTS.md" ]; then
   echo "ERROR: AGENTS.md not found. Please run this script from project root."
@@ -24,7 +25,7 @@ if [ ! -f "$MASTER_QUEUE_FILE" ]; then
   exit 1
 fi
 
-for script in "$RUN_MAPPING_SCRIPT" "$REVIEW_REFINE_MAPPING_SCRIPT" "$RUN_DEV_SCRIPT" "$VALIDATE_SCRIPT"; do
+for script in "$RUN_MAPPING_SCRIPT" "$REVIEW_REFINE_MAPPING_SCRIPT" "$RUN_DEV_SCRIPT" "$VALIDATE_SCRIPT" "$FINAL_VERIFY_SCRIPT"; do
   if [ ! -x "$script" ]; then
     echo "ERROR: $script is not executable or not found."
     echo "Run: chmod +x $script"
@@ -353,6 +354,34 @@ run_development_phase() {
   echo "Development phase returned control to pipeline."
 }
 
+
+current_prd_ready_for_final_verification() {
+  local impl_dir="$1"
+
+  if [ ! -f "$impl_dir/IMPLEMENTATION_MAP.md" ]; then
+    return 1
+  fi
+
+  if grep -E "^- 当前状态：(Ready|In Progress|Not Started|Needs Fix|Human Review Required|Blocked)" "$impl_dir/IMPLEMENTATION_MAP.md" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
+}
+
+run_final_verification_phase() {
+  local order="$1"
+  local module="$2"
+
+  echo ""
+  echo "----- Final verification phase for PRD $order - $module -----"
+  echo ""
+
+  "$FINAL_VERIFY_SCRIPT"
+
+  commit_if_changed "codex: final verify PRD $order - $module"
+}
+
 for round in $(seq 1 "$MAX_PIPELINE_ROUNDS"); do
   echo ""
   echo "============================================================"
@@ -417,6 +446,13 @@ for round in $(seq 1 "$MAX_PIPELINE_ROUNDS"); do
   if [ ! -f "$prd_file" ]; then
     echo "ERROR: PRD file not found: $prd_file"
     exit 1
+  fi
+
+  if current_prd_ready_for_final_verification "$impl_dir"; then
+    run_final_verification_phase "$order" "$module"
+    echo ""
+    echo "Final verification completed or reported issues. Continue in next pipeline loop."
+    continue
   fi
 
   if ! implementation_docs_exist "$impl_dir" || ! mapping_review_passed "$impl_dir"; then

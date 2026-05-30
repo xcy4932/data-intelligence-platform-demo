@@ -12,6 +12,8 @@ AI_REVIEW_SCRIPT="./scripts/codex/review-current-slice.sh"
 AI_RELEASE_SCRIPT="./scripts/codex/release-current-slice-after-ai-review.sh"
 AI_REPAIR_SCRIPT="./scripts/codex/repair-current-slice-after-ai-review.sh"
 VALIDATE_SCRIPT="./scripts/codex/validate-prd-md-consistency.sh"
+SCOPE_VALIDATE_SCRIPT="./scripts/codex/validate-slice-file-scope.sh"
+ARCHIVE_REVIEW_SCRIPT="./scripts/codex/archive-slice-review.sh"
 
 mkdir -p "$LOG_DIR"
 
@@ -30,7 +32,7 @@ if [ ! -f "$MASTER_QUEUE_FILE" ]; then
   exit 1
 fi
 
-for script in "$RUN_SLICE_SCRIPT" "$AI_REVIEW_SCRIPT" "$AI_RELEASE_SCRIPT" "$AI_REPAIR_SCRIPT" "$VALIDATE_SCRIPT"; do
+for script in "$RUN_SLICE_SCRIPT" "$AI_REVIEW_SCRIPT" "$AI_RELEASE_SCRIPT" "$AI_REPAIR_SCRIPT" "$VALIDATE_SCRIPT" "$SCOPE_VALIDATE_SCRIPT" "$ARCHIVE_REVIEW_SCRIPT"; do
   if [ ! -x "$script" ]; then
     echo "ERROR: $script is not executable or not found."
     echo "Run: chmod +x $script"
@@ -208,6 +210,10 @@ run_repair_review_loop() {
     validate_context
 
     echo ""
+    echo "Validate changed files are within current slice scope after repair..."
+    "$SCOPE_VALIDATE_SCRIPT"
+
+    echo ""
     echo "Run AI review again after repair..."
     review_log="$(run_ai_review_once)"
   done
@@ -263,6 +269,10 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   echo ""
   echo "Validate PRD md consistency after implementation..."
   validate_context
+
+  echo ""
+  echo "Validate changed files are within current slice scope..."
+  "$SCOPE_VALIDATE_SCRIPT"
 
   echo ""
   echo "Checking self-review result..."
@@ -362,6 +372,8 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     echo "Current status after AI release:"
     echo "$CURRENT_STATUS_AFTER_RELEASE"
     echo ""
+
+    "$ARCHIVE_REVIEW_SCRIPT"
 
     commit_current_iteration "$i" "$CURRENT_SLICE_BEFORE"
 

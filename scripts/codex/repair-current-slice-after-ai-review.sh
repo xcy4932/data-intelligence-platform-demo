@@ -83,9 +83,9 @@ Read first:
 12. git diff
 
 Repair rules:
-1. Only repair AI_REVIEW_BLOCKING_ISSUES.
+1. Only repair AI_REVIEW_AUTO_FIXABLE_BLOCKING_ISSUES.
 2. A repair is allowed only if it is clearly inside the current slice.
-3. If a Blocking issue requires changing slice boundaries, re-mapping, broad refactor, product judgment, or future-slice work, do not repair it. Mark the slice as Needs Fix and stop.
+3. If an issue is listed under AI_REVIEW_NON_AUTO_FIXABLE_BLOCKING_ISSUES, do not repair it. Mark the slice as Needs Fix or Blocked and stop.
 4. If a Blocking issue is caused by unrelated files, do not modify those files unless they were changed by the current slice.
 5. Keep permission checks before write operations.
 6. Keep business validations before refresh/log emits.

@@ -1,6 +1,6 @@
 ---
 name: prd-slice-ai-release-review
-description: Use this skill during AI second-pass review of an implemented PRD slice. It determines whether the slice can be released automatically after Human Review Required, using strict Blocking / Should Fix / Suggestion criteria.
+description: Use this skill during AI second-pass review of an implemented PRD slice. It determines whether the slice can be released automatically after Human Review Required, using Blocking / Auto-fixable Blocking / Non-auto-fixable Blocking / Should Fix / Suggestion criteria.
 ---
 
 # PRD Slice AI Release Review Skill
@@ -15,7 +15,8 @@ The goal is to avoid both unsafe release and endless perfectionism.
 
 Classify every issue as one of:
 
-- Blocking
+- Auto-fixable Blocking
+- Non-auto-fixable Blocking
 - Should Fix
 - Suggestion
 
@@ -23,7 +24,8 @@ Only Blocking issues prevent release.
 
 A slice can be released only when:
 
-- Blocking issues count is 0
+- Auto-fixable Blocking count is 0
+- Non-auto-fixable Blocking count is 0
 - required checks pass
 - slice boundary is respected
 - implementation documents are consistent
@@ -45,6 +47,66 @@ Always inspect:
 - git diff
 - commands and results recorded in SLICE_SELF_REVIEW.md
 - files changed in the current slice
+
+## Auto-fixable Blocking
+
+These block release, but automation may attempt repair if they are clearly inside the current slice:
+
+- Missing current-slice acceptance behavior.
+- Missing required loading/empty/error/403/disabled/success/failure state.
+- Button/action wiring is incomplete inside current slice.
+- Form validation required by current slice is missing.
+- Failure feedback required by current slice is missing.
+- Submit loading / duplicate submit prevention is missing.
+- Refresh topic is missing for current-slice write operation.
+- Audit log emit is missing for current-slice write operation.
+- Type-check/build error caused by current-slice code.
+- Targeted lint error caused by current-slice code.
+- Implementation documents are inconsistent but can be safely synchronized.
+- Allowed Files section is missing or incomplete for expected current-slice files.
+
+## Non-auto-fixable Blocking
+
+These block release and must stop automation:
+
+- Slice boundary is wrong or too large.
+- PRD requirement is ambiguous and requires product judgment.
+- Fix requires re-slicing.
+- Fix requires broad architecture change.
+- Fix requires implementing a future slice.
+- Fix requires modifying unrelated PRD/module.
+- Codex already implemented future slice early.
+- Codex changed unrelated files.
+- Fix requires large refactor outside current slice.
+- Security or permission model is unclear.
+- Data ownership or scope filtering is unclear.
+- Current PRD docs conflict and cannot be resolved mechanically.
+
+## Should Fix
+
+Should Fix issues do not block release if no Blocking issues remain.
+
+Examples:
+
+- Layout spacing can be improved but page is usable.
+- Naming can be clearer but not misleading.
+- Minor duplication exists but does not create immediate inconsistency.
+- Tooltip copy can be improved.
+- Component can be extracted later.
+- Table column order can be improved but required fields exist.
+
+## Suggestions
+
+Suggestions must not block release.
+
+Examples:
+
+- Future refactor.
+- Future visual polish.
+- Optional animation.
+- Optional extra mock scenarios.
+- Optional performance optimization not needed for current scale.
+- Future abstraction.
 
 ## Release Decision
 
@@ -68,134 +130,14 @@ only when all of the following are true:
 12. Required audit behavior is implemented for the slice.
 13. Data contracts are not broken.
 14. Implementation docs are consistent.
-15. Blocking issues count is 0.
+15. Auto-fixable Blocking count is 0.
+16. Non-auto-fixable Blocking count is 0.
 
 Return:
 
 AI_REVIEW_CAN_RELEASE: No
 
 if any Blocking issue exists.
-
-## Blocking Issues
-
-The following are Blocking:
-
-### 1. Slice Boundary Blocking
-
-- Implemented next slice early.
-- Implemented unrelated PRD/module.
-- Changed unrelated files.
-- Added broad architecture changes not required by the slice.
-- Expanded scope beyond current slice in a way that affects future slices.
-
-### 2. Acceptance Blocking
-
-- Any current-slice acceptance item is Failed.
-- Any current-slice acceptance item is Partial without a clear reason.
-- Required PRD behavior is missing.
-- Main user flow cannot be completed.
-
-### 3. Fake UI Blocking
-
-- Visible button has no real action.
-- Menu item leads to placeholder behavior when PRD expects function.
-- Table action exists but does nothing.
-- Modal/drawer opens but cannot complete intended flow.
-- TODO-only implementation is user-visible.
-- UI appears functional but is not wired.
-
-### 4. State Handling Blocking
-
-- Required loading state missing.
-- Required error state missing.
-- Required empty or filtered-empty state missing for list/table pages.
-- Required 403/no-permission state missing.
-- Required disabled action reason missing for visible disabled controls.
-- Submit state does not prevent duplicate submission.
-- Failure feedback missing for write operations.
-- Retry missing for load failure where required.
-
-### 5. Permission Blocking
-
-- User can access data or actions outside their permission.
-- Route/menu/action visibility is inconsistent.
-- No-permission users see business data.
-- Organization-scoped users see data outside scope.
-- License-disabled scenarios show License-only actions.
-- Third-party-source-disabled scenarios show invalid actions where PRD requires empty state.
-
-### 6. Data Consistency Blocking
-
-- Write operation does not refresh required list/detail/statistics/logs.
-- Cross-page refresh topic is missing for affected data.
-- Audit log refresh is missing when audit log is required.
-- List and detail can become stale after the implemented action.
-- Mock/service data relation is broken.
-
-### 7. Audit Blocking
-
-- PRD-required write action does not record audit log.
-- Audit log fields are incomplete for implemented write action.
-- Failure audit is required but missing.
-- Audit log target type/id/name is wrong.
-
-### 8. Service / Type / Mock Blocking
-
-- Type-check fails due to current slice.
-- Build fails due to current slice.
-- Service return type mismatches ServiceResult contract.
-- Mock IDs reference missing objects.
-- Service exposes mutable shared references when clone protection is expected.
-- Error codes are untyped or meaningless.
-- Permission/business validation order is changed incorrectly.
-
-### 9. Destructive / Batch / Import / Export Blocking
-
-- Destructive action lacks confirmation.
-- Delete/release operation lacks impact or blocking validation.
-- Batch operation does not show partial success/failure.
-- Import allows invalid rows to submit.
-- Export ignores current filters when PRD requires filtered export.
-- Export limit handling is missing when required.
-
-### 10. Document Consistency Blocking
-
-- CURRENT_TASK.md and CURRENT_SLICE.md disagree.
-- IMPLEMENTATION_MAP.md current slice status is wrong.
-- PROGRESS.md current slice status is wrong.
-- ACCEPTANCE_CHECKLIST.md is not updated for completed slice.
-- MASTER_PRD_QUEUE.md current slice/status is stale.
-- SLICE_SELF_REVIEW.md final status conflicts with implementation docs.
-
-## Should Fix Issues
-
-Should Fix issues do not block release if the slice is otherwise correct.
-
-Examples:
-
-- Layout spacing can be improved but page is usable.
-- Naming can be clearer but not misleading.
-- Minor duplication exists but does not create immediate inconsistency.
-- Tooltip copy can be improved.
-- Component can be extracted later.
-- Table column order can be improved but required fields exist.
-- Some optional responsive improvements are missing.
-
-If safe and within current slice, fix Should Fix issues before release.
-If fixing them would expand scope, record them only.
-
-## Suggestions
-
-Suggestions must not block release.
-
-Examples:
-
-- Future refactor.
-- Future visual polish.
-- Optional animation.
-- Optional extra mock scenarios.
-- Optional performance optimization not needed for current scale.
-- Future abstraction.
 
 ## Required Review Output
 
@@ -205,11 +147,15 @@ AI_REVIEW_FINAL_STATUS: Passed | Needs Fix | Blocked
 AI_REVIEW_RISK_LEVEL: Low | Medium | High
 AI_REVIEW_CAN_RELEASE: Yes | No
 AI_REVIEW_BLOCKING_COUNT: <number>
+AI_REVIEW_AUTO_FIXABLE_BLOCKING_COUNT: <number>
+AI_REVIEW_NON_AUTO_FIXABLE_BLOCKING_COUNT: <number>
 AI_REVIEW_SHOULD_FIX_COUNT: <number>
 AI_REVIEW_SUGGESTION_COUNT: <number>
 AI_REVIEW_CURRENT_PRD: <current PRD>
 AI_REVIEW_CURRENT_SLICE: <slice id and name>
-AI_REVIEW_BLOCKING_ISSUES:
+AI_REVIEW_AUTO_FIXABLE_BLOCKING_ISSUES:
+- <issue or None>
+AI_REVIEW_NON_AUTO_FIXABLE_BLOCKING_ISSUES:
 - <issue or None>
 AI_REVIEW_SHOULD_FIX_ISSUES:
 - <issue or None>
@@ -226,8 +172,10 @@ Set AI_REVIEW_CAN_RELEASE to Yes only if:
 
 - AI_REVIEW_FINAL_STATUS is Passed
 - AI_REVIEW_BLOCKING_COUNT is 0
+- AI_REVIEW_AUTO_FIXABLE_BLOCKING_COUNT is 0
+- AI_REVIEW_NON_AUTO_FIXABLE_BLOCKING_COUNT is 0
 - no required check failed because of this slice
 - implementation documents are consistent
 - current slice acceptance is satisfied
 
-Never set AI_REVIEW_CAN_RELEASE to Yes just because the implementation is "mostly correct".
+Never set AI_REVIEW_CAN_RELEASE to Yes just because the implementation is mostly correct.
