@@ -25,6 +25,9 @@ echo "AI review log: $LOG_FILE"
 echo ""
 
 codex exec --sandbox read-only --ask-for-approval on-request "$(cat <<PROMPT
+Use the following skills if available:
+- prd-slice-ai-release-review
+
 You are the second-pass reviewer for the current PRD slice.
 
 Current PRD:
@@ -92,10 +95,17 @@ At the very end of your response, output these exact machine-readable lines:
 AI_REVIEW_FINAL_STATUS: Passed | Needs Fix | Blocked
 AI_REVIEW_RISK_LEVEL: Low | Medium | High
 AI_REVIEW_CAN_RELEASE: Yes | No
+AI_REVIEW_BLOCKING_COUNT: <number>
+AI_REVIEW_SHOULD_FIX_COUNT: <number>
+AI_REVIEW_SUGGESTION_COUNT: <number>
 AI_REVIEW_CURRENT_PRD: <current PRD>
 AI_REVIEW_CURRENT_SLICE: <slice id and name>
-AI_REVIEW_REQUIRED_FIXES:
-- <required fix 1, or None>
+AI_REVIEW_BLOCKING_ISSUES:
+- <issue or None>
+AI_REVIEW_SHOULD_FIX_ISSUES:
+- <issue or None>
+AI_REVIEW_SUGGESTIONS:
+- <suggestion or None>
 AI_REVIEW_REVIEWED_FILES:
 - <file 1>
 - <file 2>

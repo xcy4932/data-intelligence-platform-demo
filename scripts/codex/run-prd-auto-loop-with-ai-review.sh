@@ -269,11 +269,13 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     AI_FINAL_STATUS="$(extract_ai_value "AI_REVIEW_FINAL_STATUS" "$AI_REVIEW_AFTER")"
     AI_CAN_RELEASE="$(extract_ai_value "AI_REVIEW_CAN_RELEASE" "$AI_REVIEW_AFTER")"
     AI_RISK_LEVEL="$(extract_ai_value "AI_REVIEW_RISK_LEVEL" "$AI_REVIEW_AFTER")"
+    AI_BLOCKING_COUNT="$(extract_ai_value "AI_REVIEW_BLOCKING_COUNT" "$AI_REVIEW_AFTER")"
 
     echo ""
     echo "AI review final status: $AI_FINAL_STATUS"
     echo "AI review can release: $AI_CAN_RELEASE"
     echo "AI review risk level: $AI_RISK_LEVEL"
+    echo "AI review blocking count: $AI_BLOCKING_COUNT"
     echo ""
 
     if [ "$AI_FINAL_STATUS" != "Passed" ]; then
@@ -284,6 +286,12 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
 
     if [ "$AI_CAN_RELEASE" != "Yes" ]; then
       echo "AI second-pass review did not allow release. Stop auto loop."
+      git status --short
+      exit 0
+    fi
+
+    if [ -n "$AI_BLOCKING_COUNT" ] && [ "$AI_BLOCKING_COUNT" != "0" ]; then
+      echo "AI second-pass review found blocking issues. Stop auto loop."
       git status --short
       exit 0
     fi
