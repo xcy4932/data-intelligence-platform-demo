@@ -326,3 +326,85 @@ The list must include:
 - `IMPLEMENTATION_MAP.md` if statuses or acceptance checklists changed
 
 Codex must not ask the user to upload unrelated files.
+## Multi-PRD Automation Rule
+
+This repository contains multiple PRDs managed by `docs/implementation/MASTER_PRD_QUEUE.md`.
+
+Codex must not hardcode any PRD implementation directory such as `docs/implementation/001_组织与身份中心`.
+
+For every run, Codex must resolve the current PRD from `docs/implementation/CURRENT_TASK.md`.
+
+`CURRENT_TASK.md` is the single source of truth for:
+- Current PRD
+- Current Implementation Directory
+- Current Slice
+- Status
+
+Every PRD must have its own implementation directory under `docs/implementation/`.
+
+Each implementation directory must contain:
+- IMPLEMENTATION_MAP.md
+- CURRENT_SLICE.md
+- PROGRESS.md
+- ACCEPTANCE_CHECKLIST.md
+- DECISIONS.md
+- SLICE_SELF_REVIEW.md
+- logs/
+
+When the current PRD is completed and verified:
+1. Mark the current PRD as Verified in `MASTER_PRD_QUEUE.md`.
+2. Find the next PRD whose status is Not Started or Ready.
+3. Create its implementation directory if missing.
+4. Initialize the required implementation documents.
+5. Update `CURRENT_TASK.md` to point to the next PRD and its implementation directory.
+6. Do not implement the first slice of the next PRD in the same run. The next slice must start in a new Codex run.
+
+Each Codex run may implement only one smallest coherent slice.
+
+An external shell loop may call Codex repeatedly, but Codex itself must not implement multiple slices in one run.
+
+## AI Second-Pass Review Rule
+
+When a slice is marked `Human Review Required`, automation may run a separate AI second-pass review using read-only sandbox mode.
+
+The AI second-pass review must:
+- inspect the actual git diff;
+- verify current slice boundaries;
+- verify acceptance criteria;
+- verify document consistency;
+- verify that no future slice was implemented early;
+- output a machine-readable release decision.
+
+If AI second-pass review returns:
+- `AI_REVIEW_FINAL_STATUS: Passed`
+- `AI_REVIEW_CAN_RELEASE: Yes`
+
+then a separate release-state update pass may mark the current slice as Done and advance to the next slice.
+
+The release-state update pass may modify only implementation documents and must not modify source code.
+
+If AI second-pass review returns Needs Fix, Blocked, or cannot make a clear release decision, automation must stop.
+
+## PRD Slice Automation Rule
+
+When running in automated mode, Codex must still implement only one smallest coherent implementation slice per run.
+
+Codex may update the implementation documents to mark the next slice as Ready, but must not implement the next slice in the same run.
+
+Automation may continue only through an external shell loop that starts a new Codex run for each slice.
+
+Codex must stop and mark Human Review Required when a slice touches shared infrastructure, including:
+- service contracts
+- route guards
+- permission matrix
+- audit log mechanism
+- cross-page refresh mechanism
+- global state
+- deletion or batch operation logic
+- data export logic
+- import/export logic
+- authentication or authorization logic
+- License logic
+- security-sensitive behavior
+
+Codex must stop on Needs Fix, Blocked, Failed, Human Review Required, or any unclear PRD boundary unless the external automation explicitly invokes AI second-pass review.

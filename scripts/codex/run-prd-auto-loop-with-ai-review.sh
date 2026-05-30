@@ -3,11 +3,8 @@ set -euo pipefail
 
 MAX_ITERATIONS="${1:-3}"
 
-PRD_DIR="docs/implementation/001_组织与身份中心"
-LOG_DIR="$PRD_DIR/logs"
-REVIEW_FILE="$PRD_DIR/SLICE_SELF_REVIEW.md"
-CURRENT_TASK_FILE="docs/implementation/CURRENT_TASK.md"
-MASTER_QUEUE_FILE="docs/implementation/MASTER_PRD_QUEUE.md"
+source ./scripts/codex/resolve-current-prd-context.sh
+resolve_current_prd_context
 
 RUN_SLICE_SCRIPT="./scripts/codex/run-slice-with-review.sh"
 AI_REVIEW_SCRIPT="./scripts/codex/review-current-slice.sh"
@@ -53,6 +50,11 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 1
 fi
 
+refresh_context() {
+  resolve_current_prd_context
+  mkdir -p "$LOG_DIR"
+}
+
 get_current_status() {
   awk '
     /^## Status/ { found=1; next }
@@ -63,6 +65,13 @@ get_current_status() {
 get_current_slice() {
   awk '
     /^## Current Slice/ { found=1; next }
+    found && NF { print $0; exit }
+  ' "$CURRENT_TASK_FILE" | tr -d '\r' || true
+}
+
+get_current_prd() {
+  awk '
+    /^## Current PRD/ { found=1; next }
     found && NF { print $0; exit }
   ' "$CURRENT_TASK_FILE" | tr -d '\r' || true
 }
@@ -110,15 +119,24 @@ commit_current_iteration() {
 }
 
 for i in $(seq 1 "$MAX_ITERATIONS"); do
+  refresh_context
+
   echo ""
   echo "========================================"
   echo "Codex PRD auto loop with AI review iteration $i / $MAX_ITERATIONS"
   echo "========================================"
   echo ""
 
+  CURRENT_PRD_BEFORE="$(get_current_prd)"
   CURRENT_SLICE_BEFORE="$(get_current_slice)"
   CURRENT_STATUS_BEFORE="$(get_current_status)"
 
+  echo "Current PRD before run:"
+  echo "$CURRENT_PRD_BEFORE"
+  echo ""
+  echo "Current implementation directory before run:"
+  echo "$PRD_DIR"
+  echo ""
   echo "Current slice before run:"
   echo "$CURRENT_SLICE_BEFORE"
   echo ""
@@ -138,6 +156,8 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
 
   "$RUN_SLICE_SCRIPT" | tee "$IMPLEMENT_LOG"
 
+  refresh_context
+
   echo ""
   echo "Checking self-review result..."
   echo ""
@@ -151,12 +171,16 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   HUMAN_REVIEW="$(extract_line "Human Review Required|Human review required|人工复核" "$REVIEW_FILE")"
   RISK_LEVEL="$(extract_line "Review Risk Level|Risk Level|risk level|风险等级" "$REVIEW_FILE")"
 
+  CURRENT_PRD_AFTER_IMPLEMENT="$(get_current_prd)"
   CURRENT_SLICE_AFTER_IMPLEMENT="$(get_current_slice)"
   CURRENT_STATUS_AFTER_IMPLEMENT="$(get_current_status)"
 
   echo "Final status line: $FINAL_STATUS"
   echo "Human review line: $HUMAN_REVIEW"
   echo "Risk level line: $RISK_LEVEL"
+  echo ""
+  echo "Current PRD after implementation:"
+  echo "$CURRENT_PRD_AFTER_IMPLEMENT"
   echo ""
   echo "Current slice after implementation:"
   echo "$CURRENT_SLICE_AFTER_IMPLEMENT"
@@ -207,6 +231,8 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
 
     "$AI_REVIEW_SCRIPT"
 
+    refresh_context
+
     AI_REVIEW_AFTER="$(latest_ai_review_log)"
 
     if [ -z "$AI_REVIEW_AFTER" ]; then
@@ -243,9 +269,15 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
 
     "$AI_RELEASE_SCRIPT" "$AI_REVIEW_AFTER"
 
+    refresh_context
+
+    CURRENT_PRD_AFTER_RELEASE="$(get_current_prd)"
     CURRENT_SLICE_AFTER_RELEASE="$(get_current_slice)"
     CURRENT_STATUS_AFTER_RELEASE="$(get_current_status)"
 
+    echo ""
+    echo "Current PRD after AI release:"
+    echo "$CURRENT_PRD_AFTER_RELEASE"
     echo ""
     echo "Current slice after AI release:"
     echo "$CURRENT_SLICE_AFTER_RELEASE"
@@ -268,19 +300,19 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     exit 0
   fi
 
-  if echo "$CURRENT_STATUS_AFTER_IMPLEMENT" | grep -Eqi "Human Review Required|Needs Fix|Blocked|Failed|Verified|Skipped"; then
+  if echo "$CURRENT_STATUS_AFTER_IMPLEMENT" | grep -Eqi "Human Review Required|Needs Fix|Blocked|Failed|Skipped"; then
     echo "Current task status requires stop: $CURRENT_STATUS_AFTER_IMPLEMENT"
     git status --short
     exit 0
   fi
 
   if [ -z "$(git status --porcelain)" ]; then
-    if [ "$CURRENT_SLICE_BEFORE" = "$CURRENT_SLICE_AFTER_IMPLEMENT" ]; then
-      echo "No changed files and current slice did not advance. Stop to avoid infinite loop."
+    if [ "$CURRENT_SLICE_BEFORE" = "$CURRENT_SLICE_AFTER_IMPLEMENT" ] && [ "$CURRENT_PRD_BEFORE" = "$CURRENT_PRD_AFTER_IMPLEMENT" ]; then
+      echo "No changed files and current task did not advance. Stop to avoid infinite loop."
       exit 0
     fi
 
-    echo "No changed files, but current slice advanced. Continue to next iteration."
+    echo "No changed files, but current task advanced. Continue to next iteration."
     continue
   fi
 

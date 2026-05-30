@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PRD_DIR="docs/implementation/001_组织与身份中心"
-LOG_DIR="$PRD_DIR/logs"
+source ./scripts/codex/resolve-current-prd-context.sh
+resolve_current_prd_context
+
 mkdir -p "$LOG_DIR"
 
 LOG_FILE="$LOG_DIR/codex-ai-review-$(date +"%Y%m%d-%H%M%S").log"
@@ -17,21 +18,26 @@ if [ ! -f "AGENTS.md" ]; then
   exit 1
 fi
 
-if [ ! -f "docs/implementation/CURRENT_TASK.md" ]; then
-  echo "ERROR: docs/implementation/CURRENT_TASK.md not found."
-  exit 1
-fi
-
-if [ ! -f "$PRD_DIR/CURRENT_SLICE.md" ]; then
-  echo "ERROR: $PRD_DIR/CURRENT_SLICE.md not found."
-  exit 1
-fi
-
+echo "Current PRD: $CURRENT_PRD"
+echo "Current implementation directory: $PRD_DIR"
+echo "Current slice: $CURRENT_SLICE"
 echo "AI review log: $LOG_FILE"
 echo ""
 
-codex exec --sandbox read-only --ask-for-approval on-request "$(cat <<'PROMPT'
+codex exec --sandbox read-only --ask-for-approval on-request "$(cat <<PROMPT
 You are the second-pass reviewer for the current PRD slice.
+
+Current PRD:
+$CURRENT_PRD
+
+Current implementation directory:
+$PRD_DIR
+
+Current slice:
+$CURRENT_SLICE
+
+Current status:
+$CURRENT_STATUS
 
 Your role:
 - Review only.
@@ -41,33 +47,35 @@ Your role:
 - Do not commit.
 - Do not approve based only on the previous self-review.
 - Independently inspect the current repository state, including uncommitted changes.
+- Do not hardcode any PRD implementation directory. Use the current implementation directory from $CURRENT_TASK_FILE.
 
 Read these files first:
 1. AGENTS.md
-2. docs/implementation/MASTER_PRD_QUEUE.md
-3. docs/implementation/CURRENT_TASK.md
-4. docs/implementation/001_组织与身份中心/IMPLEMENTATION_MAP.md
-5. docs/implementation/001_组织与身份中心/PROGRESS.md
-6. docs/implementation/001_组织与身份中心/CURRENT_SLICE.md
-7. docs/implementation/001_组织与身份中心/ACCEPTANCE_CHECKLIST.md
-8. docs/implementation/001_组织与身份中心/SLICE_SELF_REVIEW.md
-9. package.json
+2. $MASTER_QUEUE_FILE
+3. $CURRENT_TASK_FILE
+4. $IMPLEMENTATION_MAP_FILE
+5. $PROGRESS_FILE
+6. $CURRENT_SLICE_FILE
+7. $ACCEPTANCE_CHECKLIST_FILE
+8. $REVIEW_FILE
+9. $DECISIONS_FILE if it exists
+10. package.json
 
 Review method:
 1. Use git diff --name-only to identify changed files.
 2. Use git diff to inspect the actual code and document changes.
-3. Verify the current slice boundary from CURRENT_TASK.md and CURRENT_SLICE.md.
-4. Verify the implementation against the acceptance criteria in IMPLEMENTATION_MAP.md and ACCEPTANCE_CHECKLIST.md.
+3. Verify the current slice boundary from $CURRENT_TASK_FILE and $CURRENT_SLICE_FILE.
+4. Verify the implementation against the acceptance criteria in $IMPLEMENTATION_MAP_FILE and $ACCEPTANCE_CHECKLIST_FILE.
 5. Verify that no future slice was implemented early.
 6. Verify that no unrelated files were modified.
 7. Verify that document status is consistent across:
-   - CURRENT_SLICE.md
-   - PROGRESS.md
-   - IMPLEMENTATION_MAP.md
-   - ACCEPTANCE_CHECKLIST.md
-   - CURRENT_TASK.md
-   - MASTER_PRD_QUEUE.md
-   - SLICE_SELF_REVIEW.md
+   - $CURRENT_SLICE_FILE
+   - $PROGRESS_FILE
+   - $IMPLEMENTATION_MAP_FILE
+   - $ACCEPTANCE_CHECKLIST_FILE
+   - $CURRENT_TASK_FILE
+   - $MASTER_QUEUE_FILE
+   - $REVIEW_FILE
 8. If the slice touches service contracts, permissions, route guards, audit logs, cross-page refresh, License logic, deletion, batch operations, import/export, or security-sensitive logic, inspect that logic carefully rather than approving mechanically.
 9. Do not run commands that modify files.
 10. Do not run lint autofix.
@@ -84,6 +92,7 @@ At the very end of your response, output these exact machine-readable lines:
 AI_REVIEW_FINAL_STATUS: Passed | Needs Fix | Blocked
 AI_REVIEW_RISK_LEVEL: Low | Medium | High
 AI_REVIEW_CAN_RELEASE: Yes | No
+AI_REVIEW_CURRENT_PRD: <current PRD>
 AI_REVIEW_CURRENT_SLICE: <slice id and name>
 AI_REVIEW_REQUIRED_FIXES:
 - <required fix 1, or None>
@@ -101,4 +110,4 @@ echo "Full AI review log saved to: $LOG_FILE"
 echo ""
 
 echo "AI review decision:"
-grep -E "^AI_REVIEW_FINAL_STATUS:|^AI_REVIEW_RISK_LEVEL:|^AI_REVIEW_CAN_RELEASE:|^AI_REVIEW_CURRENT_SLICE:" "$LOG_FILE" || true
+grep -E "^AI_REVIEW_FINAL_STATUS:|^AI_REVIEW_RISK_LEVEL:|^AI_REVIEW_CAN_RELEASE:|^AI_REVIEW_CURRENT_PRD:|^AI_REVIEW_CURRENT_SLICE:" "$LOG_FILE" || true

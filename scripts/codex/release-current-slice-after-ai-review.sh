@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PRD_DIR="docs/implementation/001_组织与身份中心"
-LOG_DIR="$PRD_DIR/logs"
+source ./scripts/codex/resolve-current-prd-context.sh
+resolve_current_prd_context
+
 mkdir -p "$LOG_DIR"
 
 AI_REVIEW_LOG="${1:-}"
@@ -25,6 +26,9 @@ fi
 AI_FINAL_STATUS="$(grep -E "^AI_REVIEW_FINAL_STATUS:" "$AI_REVIEW_LOG" | tail -n 1 | cut -d ':' -f 2- | xargs || true)"
 AI_CAN_RELEASE="$(grep -E "^AI_REVIEW_CAN_RELEASE:" "$AI_REVIEW_LOG" | tail -n 1 | cut -d ':' -f 2- | xargs || true)"
 
+echo "Current PRD: $CURRENT_PRD"
+echo "Current implementation directory: $PRD_DIR"
+echo "Current slice: $CURRENT_SLICE"
 echo "AI review log: $AI_REVIEW_LOG"
 echo "AI final status: $AI_FINAL_STATUS"
 echo "AI can release: $AI_CAN_RELEASE"
@@ -45,6 +49,15 @@ RELEASE_LOG="$LOG_DIR/codex-ai-release-$(date +"%Y%m%d-%H%M%S").log"
 codex exec --sandbox workspace-write --ask-for-approval on-request "$(cat <<PROMPT
 You are the release-state updater after AI second-pass review.
 
+Current PRD:
+$CURRENT_PRD
+
+Current implementation directory:
+$PRD_DIR
+
+Current slice:
+$CURRENT_SLICE
+
 AI review log path:
 $AI_REVIEW_LOG
 
@@ -56,38 +69,49 @@ Your role:
 - Do not run code generation.
 - Do not run lint autofix.
 - Do not commit.
+- Do not hardcode any PRD implementation directory.
 
 Read these files:
 1. AGENTS.md
-2. docs/implementation/MASTER_PRD_QUEUE.md
-3. docs/implementation/CURRENT_TASK.md
-4. docs/implementation/001_组织与身份中心/IMPLEMENTATION_MAP.md
-5. docs/implementation/001_组织与身份中心/PROGRESS.md
-6. docs/implementation/001_组织与身份中心/CURRENT_SLICE.md
-7. docs/implementation/001_组织与身份中心/ACCEPTANCE_CHECKLIST.md
-8. docs/implementation/001_组织与身份中心/SLICE_SELF_REVIEW.md
-9. $AI_REVIEW_LOG
+2. $MASTER_QUEUE_FILE
+3. $CURRENT_TASK_FILE
+4. $IMPLEMENTATION_MAP_FILE
+5. $PROGRESS_FILE
+6. $CURRENT_SLICE_FILE
+7. $ACCEPTANCE_CHECKLIST_FILE
+8. $REVIEW_FILE
+9. $DECISIONS_FILE if it exists
+10. $AI_REVIEW_LOG
 
 Task:
 1. Confirm from the AI review log that:
    - AI_REVIEW_FINAL_STATUS is Passed
    - AI_REVIEW_CAN_RELEASE is Yes
 2. Mark the current slice as Done in:
-   - docs/implementation/001_组织与身份中心/CURRENT_SLICE.md
-   - docs/implementation/001_组织与身份中心/IMPLEMENTATION_MAP.md
-   - docs/implementation/001_组织与身份中心/ACCEPTANCE_CHECKLIST.md where applicable
-   - docs/implementation/001_组织与身份中心/PROGRESS.md
-   - docs/implementation/001_组织与身份中心/SLICE_SELF_REVIEW.md
+   - $CURRENT_SLICE_FILE
+   - $IMPLEMENTATION_MAP_FILE
+   - $ACCEPTANCE_CHECKLIST_FILE where applicable
+   - $PROGRESS_FILE
+   - $REVIEW_FILE
 3. Add a note that the previous Human Review Required was resolved by AI second-pass review.
-4. Advance docs/implementation/CURRENT_TASK.md to the next slice according to IMPLEMENTATION_MAP.md recommended execution order.
-5. Update docs/implementation/MASTER_PRD_QUEUE.md so PRD 001 remains In Progress and Current Slice points to the next slice.
-6. Update CURRENT_SLICE.md to the next slice as Ready or equivalent, but do not implement it.
+4. Advance $CURRENT_TASK_FILE to the next slice according to $IMPLEMENTATION_MAP_FILE recommended execution order.
+5. Update $MASTER_QUEUE_FILE so the current PRD remains In Progress and Current Slice points to the next slice.
+6. Update $CURRENT_SLICE_FILE to the next slice as Ready or equivalent, but do not implement it.
 7. If there is no next slice, mark the PRD as ready for final verification instead of inventing a next slice.
-8. Keep all document statuses consistent.
-9. Do not modify any code file.
+8. If the current PRD is completed and verified:
+   - mark it Verified in $MASTER_QUEUE_FILE
+   - find the next PRD whose status is Not Started or Ready
+   - create that PRD's implementation directory if missing
+   - initialize required implementation docs
+   - update $CURRENT_TASK_FILE to point to the next PRD
+   - do not implement the next PRD's first slice in this run
+9. Keep all document statuses consistent.
+10. Do not modify any code file.
 
 At the end, output:
+- released PRD
 - released slice
+- next PRD
 - next slice
 - documents changed
 - confirmation that no source code was modified

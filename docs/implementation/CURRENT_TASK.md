@@ -10,16 +10,16 @@ docs/implementation/001_组织与身份中心/
 
 ## Current Slice
 
-OIC-002 - 组织与身份概览
+OIC-001H - 跨页面刷新事件机制
 
 ## Status
 
-Ready
+Human Review Required
 
 ## Last Run Summary
 
-OIC-001H 人工复核修复已完成：`createUser` 成功创建用户后会先根据 `payload.assign_license` 组装 `refreshTopics`；当新增用户同时占用 License 时额外触发 `identityRefreshTopics.licenses`，未改变权限校验、重复值校验、License 不足校验或其它写操作逻辑。指定 type-check、build、oxlint 和 eslint 检查均已通过。
+OIC-001H 跨页面刷新事件机制已实现：新增刷新事件工具，提供 topic、emit、subscribe、unsubscribe、重复刷新去重和 listener 错误统计；现有组织身份 mock 写操作成功路径已按 topic 发出局部刷新通知。因该切片属于 cross-page refresh 共享机制且接入 service 写操作，self-review 最终状态为 Human Review Required。
 
 ## Next Recommended Action
 
-Implement OIC-002 - 组织与身份概览 as the next smallest slice. Do not start OIC-003 or later slices before OIC-002 is completed and reviewed.
+Run AI second-pass review for the current slice. If AI review passes, release OIC-001H as Done and advance to OIC-002. Do not implement OIC-002 in the same release pass.
