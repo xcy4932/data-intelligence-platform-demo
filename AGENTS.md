@@ -427,3 +427,11 @@ Issues found by these skills must be classified as:
 - Suggestion: record only; do not expand the current slice just to implement suggestions.
 
 Codex must not use quality review suggestions as an excuse to implement future slices or redesign unrelated modules.
+
+## Review Loop Limit Rule
+
+For PRD mapping quality review, automation may run review/refine loops, but the maximum number of rounds must be explicitly provided by the shell script. The recommended maximum is 3.
+
+For implemented development slices, AI second-pass review may run at most once per slice. If AI second-pass review returns Needs Fix, Blocked, or AI_REVIEW_CAN_RELEASE: No, automation must stop. Codex must not automatically enter a repair-review loop for the same implemented slice unless the user explicitly requests it.
+
+Within one implementation run, Codex may fix self-review issues once if they are within the current slice. If issues remain after one fix attempt, mark Needs Fix or Human Review Required and stop.
