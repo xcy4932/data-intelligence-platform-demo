@@ -408,3 +408,22 @@ Codex must stop and mark Human Review Required when a slice touches shared infra
 - security-sensitive behavior
 
 Codex must stop on Needs Fix, Blocked, Failed, Human Review Required, or any unclear PRD boundary unless the external automation explicitly invokes AI second-pass review.
+
+## Frontend Quality Skill Rule
+
+For frontend PRD slices, Codex should use the following quality review skills when available:
+
+- frontend-ui-layout-review
+- frontend-ux-flow-review
+- frontend-code-quality-review
+- data-table-form-usability-review
+- frontend-accessibility-review
+- frontend-performance-review
+
+Issues found by these skills must be classified as:
+
+- Blocking: must fix before the slice can be Done.
+- Should Fix: fix if it is within the current slice and safe.
+- Suggestion: record only; do not expand the current slice just to implement suggestions.
+
+Codex must not use quality review suggestions as an excuse to implement future slices or redesign unrelated modules.

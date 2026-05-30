@@ -45,6 +45,12 @@ Use the following skills if available:
 - prd-queue-runner
 - senior-feature-implementation
 - frontend-interaction-review
+- frontend-ui-layout-review
+- frontend-ux-flow-review
+- frontend-code-quality-review
+- data-table-form-usability-review
+- frontend-accessibility-review
+- frontend-performance-review
 - regression-quality-check
 - prd-slice-self-review
 
