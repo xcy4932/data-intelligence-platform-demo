@@ -9,6 +9,7 @@ resolve_current_prd_context
 RUN_SLICE_SCRIPT="./scripts/codex/run-slice-with-review.sh"
 AI_REVIEW_SCRIPT="./scripts/codex/review-current-slice.sh"
 AI_RELEASE_SCRIPT="./scripts/codex/release-current-slice-after-ai-review.sh"
+VALIDATE_SCRIPT="./scripts/codex/validate-prd-md-consistency.sh"
 
 mkdir -p "$LOG_DIR"
 
@@ -45,6 +46,12 @@ if [ ! -x "$AI_RELEASE_SCRIPT" ]; then
   exit 1
 fi
 
+if [ ! -x "$VALIDATE_SCRIPT" ]; then
+  echo "ERROR: $VALIDATE_SCRIPT is not executable or not found."
+  echo "Run: chmod +x $VALIDATE_SCRIPT"
+  exit 1
+fi
+
 if ! command -v codex >/dev/null 2>&1; then
   echo "ERROR: codex command not found."
   exit 1
@@ -53,6 +60,10 @@ fi
 refresh_context() {
   resolve_current_prd_context
   mkdir -p "$LOG_DIR"
+}
+
+validate_context() {
+  "$VALIDATE_SCRIPT"
 }
 
 get_current_status() {
@@ -111,6 +122,8 @@ commit_current_iteration() {
     return 0
   fi
 
+  validate_context
+
   git add .
   git commit -m "codex: complete PRD slice auto iteration $iteration - $slice_name" || {
     echo "Git commit failed. Stop auto loop."
@@ -127,10 +140,14 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   echo "========================================"
   echo ""
 
+  echo "Validate PRD md consistency before iteration..."
+  validate_context
+
   CURRENT_PRD_BEFORE="$(get_current_prd)"
   CURRENT_SLICE_BEFORE="$(get_current_slice)"
   CURRENT_STATUS_BEFORE="$(get_current_status)"
 
+  echo ""
   echo "Current PRD before run:"
   echo "$CURRENT_PRD_BEFORE"
   echo ""
@@ -157,6 +174,10 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   "$RUN_SLICE_SCRIPT" | tee "$IMPLEMENT_LOG"
 
   refresh_context
+
+  echo ""
+  echo "Validate PRD md consistency after implementation..."
+  validate_context
 
   echo ""
   echo "Checking self-review result..."
@@ -270,6 +291,10 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     "$AI_RELEASE_SCRIPT" "$AI_REVIEW_AFTER"
 
     refresh_context
+
+    echo ""
+    echo "Validate PRD md consistency after AI release..."
+    validate_context
 
     CURRENT_PRD_AFTER_RELEASE="$(get_current_prd)"
     CURRENT_SLICE_AFTER_RELEASE="$(get_current_slice)"

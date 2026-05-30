@@ -33,7 +33,7 @@ Do not hardcode a PRD implementation directory in scripts or prompts.
 
 | Order | PRD File | Module | Implementation Directory | Status | Current Slice | Priority | Notes |
 |---|---|---|---|---|---|---|---|
-| 001 | docs/prd/001 组织与身份中心 PRD.md | 组织与身份中心 | docs/implementation/001_组织与身份中心/ | Human Review Required | OIC-001H | P0 | 当前正在处理；等待 AI 二次复核或人工复核后进入下一切片 |
+| 001 | docs/prd/001-组织与身份中心 PRD.md | 组织与身份中心 | docs/implementation/001_组织与身份中心/ | In Progress | OIC-002 | P0 | OIC-001H 已完成人工复核修复，当前进入 OIC-002 组织与身份概览 |
 | 002 | docs/prd/002 开放平台与集成中心 PRD.md | 开放平台与集成中心 | docs/implementation/002_开放平台与集成中心/ | Not Started | - | P0 | 依赖组织与身份、权限、审计能力 |
 | 003 | docs/prd/003 权限与策略中心 PRD.md | 权限与策略中心 | docs/implementation/003_权限与策略中心/ | Not Started | - | P0 | 依赖组织、身份、角色与资源模型 |
 | 004 | docs/prd/004 申请审批与流程中心 PRD.md | 申请审批与流程中心 | docs/implementation/004_申请审批与流程中心/ | Not Started | - | P0 | 依赖权限、组织、审计与通知能力 |
