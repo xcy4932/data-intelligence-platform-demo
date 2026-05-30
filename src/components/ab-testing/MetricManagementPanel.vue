@@ -6,6 +6,8 @@ import {
   NAlert,
   NButton,
   NCheckbox,
+  NDescriptions,
+  NDescriptionsItem,
   NDrawer,
   NDrawerContent,
   NEmpty,
@@ -56,7 +58,6 @@ import type {
   MetricFilterGroup,
   MetricGroup,
   MetricGroupEditorPayload,
-  MetricPermissionRoleMatrix,
   MetricTemplate,
   MustSeeMetricTrend,
   OperationLog,
@@ -146,7 +147,6 @@ const {
   metricGroupMergeIds,
   metricDirectoryGroups,
   metricGroups,
-  metricPermissionRoles,
   metricTemplates,
   metrics,
   mustSeeMetrics,
@@ -727,23 +727,6 @@ function historySnapshotText(value?: unknown) {
   return Object.entries(value as Record<string, unknown>)
     .map(([key, item]) => `${key}: ${Array.isArray(item) ? item.join(',') : String(item)}`)
     .join('；')
-}
-
-function metricPermissionCapabilityLabel(capability: MetricPermissionRoleMatrix['capabilities'][number]) {
-  const labels: Record<MetricPermissionRoleMatrix['capabilities'][number], string> = {
-    list: '列表可见',
-    view_detail: '查看详情',
-    view_statistic: '查看统计值',
-    use_in_experiment: '实验选择',
-    edit: '编辑',
-    offline: '下线',
-    copy: '复制',
-    grant: '用户赋权',
-    set_must_see: '设置必看',
-    manage_template: '模板管理',
-    manage_alarm: '报警管理',
-  }
-  return labels[capability] ?? capability
 }
 
 const mergeSources = computed(() =>
@@ -2065,21 +2048,36 @@ watch(
         </div>
 
         <div class="metric-detail-grid">
-          <section class="metric-block">
+          <section class="metric-block metric-info-block">
             <div class="metric-block-title">
               <h3>基本信息</h3>
             </div>
-            <div class="definition-grid">
-              <span>指标组类型</span><strong>{{ groupTypeLabel(selectedMetricGroup.type) }}</strong>
-              <span>状态</span><strong>{{ groupStatusLabel(selectedMetricGroup.status) }}</strong>
-              <span>Owner</span><strong>{{ selectedMetricGroup.owner.name }}</strong>
-              <span>创建人</span><strong>{{ memberName(selectedMetricGroup.creatorId) }}</strong>
-              <span>创建时间</span><strong>{{ formatDate(selectedMetricGroup.createdAt) }}</strong>
-              <span>更新时间</span><strong>{{ formatDate(selectedMetricGroup.updatedAt) }}</strong>
-              <span>权限类型</span><strong>{{ permissionLabel(selectedMetricGroup.permissionType) }}</strong>
-              <span>授权用户数量</span><strong>{{ selectedMetricGroup.authorizedUserIds.length }}</strong>
-              <span>所属目录分组</span><strong>{{ directoryName(selectedMetricGroup.directoryGroupId) }}</strong>
+            <div class="metric-info-tags">
+              <n-tag size="small">{{ groupTypeLabel(selectedMetricGroup.type) }}</n-tag>
+              <n-tag :type="selectedMetricGroup.status === 'active' ? 'success' : 'default'" size="small">
+                {{ groupStatusLabel(selectedMetricGroup.status) }}
+              </n-tag>
+              <n-tag :type="selectedMetricGroup.permissionType === 'public' ? 'info' : 'warning'" size="small">
+                {{ permissionLabel(selectedMetricGroup.permissionType) }}
+              </n-tag>
+              <button type="button" class="link-button" @click="associationModalVisible = true">
+                {{ selectedGroupExperiments.length }} 个关联实验
+              </button>
             </div>
+            <n-descriptions
+              class="compact-descriptions"
+              :column="3"
+              size="small"
+              label-placement="top"
+              bordered
+            >
+              <n-descriptions-item label="指标数量">{{ selectedMetricGroup.metricIds.length }}</n-descriptions-item>
+              <n-descriptions-item label="Owner">{{ selectedMetricGroup.owner.name }}</n-descriptions-item>
+              <n-descriptions-item label="创建人">{{ memberName(selectedMetricGroup.creatorId) }}</n-descriptions-item>
+              <n-descriptions-item label="创建时间">{{ formatDate(selectedMetricGroup.createdAt) }}</n-descriptions-item>
+              <n-descriptions-item label="更新时间">{{ formatDate(selectedMetricGroup.updatedAt) }}</n-descriptions-item>
+              <n-descriptions-item label="所属目录">{{ directoryName(selectedMetricGroup.directoryGroupId) }}</n-descriptions-item>
+            </n-descriptions>
           </section>
 
           <section class="metric-block">
@@ -2130,52 +2128,28 @@ watch(
               </n-alert>
             </template>
             <template v-else>
-              <p class="muted">
-                {{
-                  selectedMetricGroup.permissionType === 'public'
-                    ? '公共指标组可被当前应用下拥有指标管理查看权限的用户查看。'
-                    : '私有指标组仅 Owner、管理员和已授权用户可见。'
-                }}
-              </p>
-              <div class="permission-summary-grid">
-                <div>
-                  <span>权限类型</span>
-                  <strong>{{ permissionLabel(selectedMetricGroup.permissionType) }}</strong>
-                </div>
-                <div>
-                  <span>Owner</span>
-                  <strong>{{ selectedMetricGroup.owner.name }}</strong>
-                </div>
-                <div>
-                  <span>管理员</span>
-                  <strong>默认拥有管理权限</strong>
-                </div>
-                <div>
-                  <span>授权用户</span>
-                  <strong>{{ selectedMetricGroup.authorizedUserIds.length }} 人</strong>
-                </div>
-              </div>
-              <div class="permission-strip">
-                <n-tag type="info">{{ selectedMetricGroup.owner.name }} · Owner</n-tag>
-                <n-tag v-for="userId in selectedMetricGroup.authorizedUserIds" :key="userId">{{ memberName(userId) }}</n-tag>
-                <span v-if="!selectedMetricGroup.authorizedUserIds.length" class="muted">暂无单独授权用户</span>
-              </div>
-              <div class="permission-role-matrix">
-                <div v-for="role in metricPermissionRoles" :key="role.id" class="permission-role-row">
-                  <div>
-                    <strong>{{ role.roleName }}</strong>
-                    <span>{{ role.description }}</span>
-                  </div>
-                  <div>
-                    <n-tag
-                      v-for="capability in role.capabilities"
-                      :key="`${role.id}-${capability}`"
-                      size="small"
-                      :type="capability === 'set_must_see' || capability === 'manage_alarm' ? 'success' : 'default'"
-                    >
-                      {{ metricPermissionCapabilityLabel(capability) }}
-                    </n-tag>
-                  </div>
+              <n-descriptions
+                class="compact-descriptions"
+                :column="2"
+                size="small"
+                label-placement="top"
+                bordered
+              >
+                <n-descriptions-item label="可见范围">
+                  <n-tag :type="selectedMetricGroup.permissionType === 'public' ? 'info' : 'warning'" size="small">
+                    {{ permissionLabel(selectedMetricGroup.permissionType) }}
+                  </n-tag>
+                </n-descriptions-item>
+                <n-descriptions-item label="Owner">{{ selectedMetricGroup.owner.name }}</n-descriptions-item>
+                <n-descriptions-item label="管理员">默认拥有管理权限</n-descriptions-item>
+                <n-descriptions-item label="单独授权">{{ selectedMetricGroup.authorizedUserIds.length }} 人</n-descriptions-item>
+              </n-descriptions>
+              <div class="permission-user-strip">
+                <span>授权成员</span>
+                <div class="permission-strip">
+                  <n-tag type="info" size="small">{{ selectedMetricGroup.owner.name }} · Owner</n-tag>
+                  <n-tag v-for="userId in selectedMetricGroup.authorizedUserIds" :key="userId" size="small">{{ memberName(userId) }}</n-tag>
+                  <span v-if="!selectedMetricGroup.authorizedUserIds.length" class="muted">暂无单独授权用户</span>
                 </div>
               </div>
             </template>
@@ -3603,6 +3577,7 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 14px;
+  align-items: start;
 }
 
 .metric-block,
@@ -3619,6 +3594,31 @@ p {
 .metric-block {
   display: grid;
   gap: 12px;
+}
+
+.metric-info-block {
+  align-content: start;
+}
+
+.metric-info-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.compact-descriptions {
+  width: 100%;
+}
+
+.compact-descriptions :deep(.n-descriptions-table-header),
+.compact-descriptions :deep(.n-descriptions-table-content) {
+  padding: 9px 12px;
+}
+
+.compact-descriptions :deep(.n-descriptions-table-header) {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .definition-grid {
@@ -3644,21 +3644,15 @@ p {
   gap: 8px;
 }
 
-.permission-summary-grid,
 .permission-editor-grid {
   display: grid;
   gap: 10px;
 }
 
-.permission-summary-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .permission-editor-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.permission-summary-grid > div,
 .permission-editor-grid label {
   display: grid;
   gap: 4px;
@@ -3668,7 +3662,6 @@ p {
   background: #f8fafc;
 }
 
-.permission-summary-grid span,
 .permission-editor-grid span,
 .metric-head-copy span {
   color: #64748b;
@@ -3679,34 +3672,12 @@ p {
   grid-column: 1 / -1;
 }
 
-.permission-role-matrix {
+.permission-user-strip {
   display: grid;
   gap: 8px;
 }
 
-.permission-role-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
-  gap: 12px;
-  align-items: start;
-  padding: 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.permission-role-row > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.permission-role-row > div:first-child {
-  display: grid;
-  gap: 4px;
-}
-
-.permission-role-row span {
+.permission-user-strip > span {
   color: #64748b;
   font-size: 12px;
 }
@@ -4010,7 +3981,6 @@ p {
   .metric-toolbar,
   .metric-config-head,
   .metric-display-header,
-  .permission-summary-grid,
   .event-config-row,
   .aggregation-filter-row,
   .alarm-strategy-row,

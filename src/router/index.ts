@@ -48,8 +48,22 @@ import LifecycleAnalysisView from '@/views/user-insight/LifecycleAnalysisView.vu
 import TagSystemView from '@/views/user-insight/TagSystemView.vue'
 import UserSegmentView from '@/views/user-insight/UserSegmentView.vue'
 import PlaceholderPage from '@/views/PlaceholderPage.vue'
+import NotFoundView from '@/views/NotFoundView.vue'
+import OrganizationIdentityShellView from '@/views/organization-identity/OrganizationIdentityShellView.vue'
 import { adAnalysisService } from '@/services/adAnalysisService'
+import { organizationIdentityService } from '@/services/organizationIdentityService'
 import { profilePermissionSet } from '@/mock/profiles'
+import {
+  applyOrganizationIdentityAccessOptions,
+  getCurrentOrganizationIdentityAccessOptions,
+  getOrganizationIdentityPageDecision,
+  getOrganizationIdentityServiceAccessOptions,
+  isIdentityPageKey,
+  organizationIdentityMenuItems,
+} from '@/utils/organizationIdentityPermissions'
+
+const organizationIdentityModuleTitle = '组织与身份中心'
+const organizationIdentityForbiddenPath = '/organization-identity/forbidden'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -64,6 +78,33 @@ const router = createRouter({
           path: 'dashboard',
           component: DashboardView,
           meta: { title: '首页驾驶舱', module: '首页' },
+        },
+        {
+          path: 'organization-identity',
+          redirect: '/organization-identity/overview',
+        },
+        ...organizationIdentityMenuItems.map((item) => ({
+          path: `organization-identity/${item.routeSegment}`,
+          component: OrganizationIdentityShellView,
+          meta: {
+            title: item.label,
+            module: organizationIdentityModuleTitle,
+            pageKey: item.pageKey,
+            requiredPage: item.pageKey,
+            breadcrumb: [organizationIdentityModuleTitle, item.label],
+          },
+        })),
+        {
+          path: 'organization-identity/forbidden',
+          component: OrganizationIdentityShellView,
+          meta: {
+            title: '无权限',
+            module: organizationIdentityModuleTitle,
+            pageKey: 'overview',
+            requiredPage: 'overview',
+            breadcrumb: [organizationIdentityModuleTitle, '无权限'],
+            shellState: 'forbidden',
+          },
         },
 
         // 可视化分析
@@ -756,14 +797,22 @@ const router = createRouter({
 
         // A/B 测试
         {
+          path: 'ab-testing',
+          redirect: '/ab-testing/experiments',
+        },
+        {
           path: 'ab-testing/overview',
-          component: AbTestingWorkbenchView,
-          meta: { title: '实验概览', module: 'A/B 测试', abPage: 'overview' },
+          redirect: '/ab-testing/experiments',
         },
         {
           path: 'ab-testing/experiments',
           component: AbTestingWorkbenchView,
           meta: { title: '实验列表', module: 'A/B 测试', abPage: 'experiments' },
+        },
+        {
+          path: 'ab-testing/experiments/:experimentId',
+          component: AbTestingWorkbenchView,
+          meta: { title: '实验详情', module: 'A/B 测试', abPage: 'experimentDetail' },
         },
         {
           path: 'ab-testing/create',
@@ -772,21 +821,20 @@ const router = createRouter({
         },
         {
           path: 'abtest/experiments/create/type',
-          redirect: '/ab-testing/create',
+          redirect: '/ab-testing/experiments',
         },
         {
           path: 'ab-testing/results',
-          redirect: '/ab-testing/reports',
+          redirect: '/ab-testing/experiments',
         },
         {
           path: 'ab-testing/reports',
-          component: AbTestingWorkbenchView,
-          meta: { title: '实验报告', module: 'A/B 测试', abPage: 'reports' },
+          redirect: '/ab-testing/experiments',
         },
         {
           path: 'ab-testing/experiments/:experimentId/report',
           component: AbTestingWorkbenchView,
-          meta: { title: '实验详情', module: 'A/B 测试', abPage: 'reports' },
+          meta: { title: '实验报告', module: 'A/B 测试', abPage: 'reports' },
         },
         {
           path: 'ab-testing/metrics',
@@ -964,6 +1012,11 @@ const router = createRouter({
           component: PlaceholderPage,
           meta: { title: '数据隐私', module: '系统管理' },
         },
+        {
+          path: ':pathMatch(.*)*',
+          component: NotFoundView,
+          meta: { title: '页面不存在', module: '系统' },
+        },
       ],
     },
     {
@@ -985,6 +1038,33 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (to.path.startsWith('/organization-identity') && to.path !== organizationIdentityForbiddenPath) {
+    const requiredPage = to.meta.requiredPage
+
+    if (isIdentityPageKey(requiredPage)) {
+      const accessOptions = getCurrentOrganizationIdentityAccessOptions()
+      const accessResult = await organizationIdentityService.getIdentityAccessContext(
+        getOrganizationIdentityServiceAccessOptions(accessOptions),
+      )
+
+      if (!accessResult.success) {
+        return {
+          path: organizationIdentityForbiddenPath,
+          query: { reason: accessResult.error.code, from: to.fullPath },
+        }
+      }
+
+      const accessContext = applyOrganizationIdentityAccessOptions(accessResult.data, accessOptions)
+      const decision = getOrganizationIdentityPageDecision(requiredPage, accessContext)
+      if (!decision.allowed) {
+        return {
+          path: organizationIdentityForbiddenPath,
+          query: { reason: decision.reason, requiredPage, from: to.fullPath },
+        }
+      }
+    }
+  }
+
   if (to.path.startsWith('/user-insight/profiles') && !profilePermissionSet.viewProfile) {
     return '/dashboard'
   }

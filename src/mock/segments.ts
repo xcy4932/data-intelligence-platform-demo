@@ -588,8 +588,8 @@ const appLinks = [
     name: '实验创建',
     enabled: true,
     prerequisite: '需要 A/B 测试权限',
-    targetRoute: '/ab-testing/create',
-    description: '将当前分群作为实验受众继续配置实验参数。',
+    targetRoute: '/ab-testing/experiments',
+    description: '进入实验列表后通过“新建实验”将当前分群作为实验受众继续配置实验参数。',
     queryKeys: ['segmentId', 'segmentName', 'count'],
   },
 ] satisfies SegmentRecord['applications']
@@ -1757,7 +1757,7 @@ export const segmentLineageNodes: SegmentLineageNode[] = [
     relationType: '实验受众',
     owner: growthOwner,
     updatedAt: '2026-05-25T10:45:00+02:00',
-    targetRoute: '/ab-testing/create',
+    targetRoute: '/ab-testing/experiments',
   },
   {
     id: 'lin-realtime-event',

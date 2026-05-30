@@ -131,6 +131,7 @@ function removeChildGroup(groupId: string) {
 .filter-builder {
   display: grid;
   gap: 10px;
+  min-width: 0;
   border: 1px solid #d9e2ec;
   border-radius: 8px;
   padding: 10px;
@@ -148,6 +149,7 @@ function removeChildGroup(groupId: string) {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .filter-builder-head {
@@ -171,6 +173,7 @@ function removeChildGroup(groupId: string) {
 
 .filter-actions :deep(.n-select) {
   width: 150px;
+  max-width: 100%;
 }
 
 .condition-list,
@@ -181,7 +184,13 @@ function removeChildGroup(groupId: string) {
 
 .condition-row {
   display: grid;
-  grid-template-columns: 58px minmax(160px, 1fr) minmax(130px, 0.75fr) minmax(160px, 1fr) 76px;
+  grid-template-columns: 58px minmax(0, 1.1fr) minmax(110px, 0.75fr) minmax(120px, 1fr) 64px;
+}
+
+.condition-row > *,
+.filter-builder :deep(.n-select),
+.filter-builder :deep(.n-input) {
+  min-width: 0;
 }
 
 .child-group-shell {

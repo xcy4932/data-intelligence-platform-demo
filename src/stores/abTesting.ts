@@ -1690,8 +1690,8 @@ export const useAbTestingStore = defineStore('abTesting', () => {
     ] = await Promise.all([
         abTestingService.getReportOverview(experimentId),
         abTestingService.queryMetricResults(experimentId, filter),
-        funnelMetricId ? abTestingService.getFunnelReport(funnelMetricId) : Promise.resolve(undefined),
-        cohortMetricId ? abTestingService.getCohortReport(cohortMetricId) : Promise.resolve(undefined),
+        funnelMetricId ? abTestingService.getFunnelReport(funnelMetricId, experimentId) : Promise.resolve(undefined),
+        cohortMetricId ? abTestingService.getCohortReport(cohortMetricId, experimentId) : Promise.resolve(undefined),
         abTestingService.getHeatmapReport(experimentId),
         abTestingService.getMabReport(experimentId),
         abTestingService.getSensitiveInsightTasks(experimentId),

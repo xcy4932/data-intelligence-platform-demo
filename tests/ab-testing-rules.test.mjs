@@ -14,6 +14,155 @@ import {
   validateMetricFormula,
   validateTrafficRatios,
 } from '../src/utils/abTestingRules.ts'
+import {
+  abAlarmTasks,
+  abExperimentVariants,
+  abExperiments,
+  abFeatureFlags,
+  abFeatureVersions,
+  abMetricGroups,
+  abMetricBindingSnapshots,
+  abMetrics,
+  abMetricTemplates,
+  abMustSeeMetricTrends,
+  abOperationLogs,
+  abPublishPlans,
+  abReceiverGroups,
+  abReportOverviews,
+  abWhitelistTests,
+} from '../src/mock/abTesting.ts'
+
+const abExperimentTypes = [
+  'CLIENT_CODE',
+  'SERVER_CODE',
+  'VISUAL',
+  'SPLIT_URL',
+  'PUSH',
+  'MAB',
+  'MVT',
+  'PERSONALIZATION_WEB',
+  'PERSONALIZATION_CODE',
+  'PARENT_CHILD',
+  'REVERSE',
+  'AD',
+]
+
+test('mock data covers every A/B experiment type with variants and reports', () => {
+  for (const type of abExperimentTypes) {
+    const experiment = abExperiments.find((item) => item.type === type)
+    assert.ok(experiment, `missing experiment for ${type}`)
+    assert.ok(abExperimentVariants.some((variant) => variant.experimentId === experiment.id), `missing variants for ${type}`)
+    const report = abReportOverviews.find((overview) => overview.experimentId === experiment.id)
+    assert.ok(report, `missing report for ${type}`)
+    assert.equal(report.coreMetricResults.length > 0, true, `missing metric results for ${type}`)
+    assert.equal(report.versions.length > 0, true, `missing report versions for ${type}`)
+    assert.equal(abMetricBindingSnapshots.some((snapshot) => snapshot.experimentId === experiment.id), true, `missing metric snapshots for ${type}`)
+  }
+})
+
+test('metric management mock data covers group types and interactions', () => {
+  const groupTypes = new Set(abMetricGroups.map((group) => group.type))
+  for (const type of ['event', 'retention', 'funnel']) {
+    assert.equal(groupTypes.has(type), true, `missing ${type} metric group`)
+  }
+
+  for (const group of abMetricGroups) {
+    const groupMetrics = group.metricIds
+      .map((metricId) => abMetrics.find((metric) => metric.id === metricId))
+      .filter(Boolean)
+    assert.equal(groupMetrics.length, group.metricIds.length, `metric group ${group.id} references missing metrics`)
+    assert.equal(groupMetrics.length > 0, true, `metric group ${group.id} should have metrics`)
+    for (const metric of groupMetrics) {
+      assert.equal(metric.metricCategory, group.type, `metric ${metric.id} type should match group ${group.id}`)
+      assert.equal(metric.metricGroupId, group.id, `metric ${metric.id} should point back to group ${group.id}`)
+      assert.equal(metric.status, group.status, `metric ${metric.id} status should match group ${group.id}`)
+    }
+    if (group.type === 'retention' || group.type === 'funnel') {
+      assert.equal(group.metricIds.length, 1, `${group.type} metric group ${group.id} should contain exactly one metric`)
+    }
+  }
+
+  assert.equal(abMetricGroups.some((group) => group.status === 'active'), true)
+  assert.equal(abMetricGroups.some((group) => group.status === 'offline'), true)
+  assert.equal(abMetricGroups.some((group) => group.permissionType === 'public'), true)
+  assert.equal(abMetricGroups.some((group) => group.permissionType === 'private'), true)
+  assert.equal(abMetricTemplates.some((template) => template.templateType === 'common'), true)
+  assert.equal(abMetricTemplates.some((template) => template.templateType === 'personal'), true)
+  assert.equal(abAlarmTasks.some((task) => task.alarmType === 'dashboard'), true)
+  assert.equal(abAlarmTasks.some((task) => task.alarmType === 'experiment'), true)
+  assert.equal(abAlarmTasks.some((task) => task.enabled), true)
+  assert.equal(abAlarmTasks.some((task) => !task.enabled), true)
+  assert.equal(abReceiverGroups.length >= 3, true)
+
+  const eventDefinitions = abMetrics
+    .filter((metric) => metric.metricCategory === 'event')
+    .map((metric) => metric.definition)
+    .filter((definition) => 'events' in definition)
+  assert.equal(abMetrics.some((metric) => metric.metricCategory === 'event' && metric.metricKind === 'composite'), true)
+  assert.equal(
+    eventDefinitions.some((definition) => definition.events.some((event) => event.propertyId && ['sum/au', 'sum/uv', 'sum/pv', 'sum', 'count_distinct'].includes(event.operator))),
+    true,
+  )
+  assert.equal(eventDefinitions.some((definition) => definition.events.some((event) => event.aggregationFilter?.enabled)), true)
+  assert.equal(eventDefinitions.some((definition) => definition.flexibleProperties.length > 0), true)
+
+  const mustSeeMetricIds = abMetrics.filter((metric) => metric.isMustSee).map((metric) => metric.id)
+  assert.equal(mustSeeMetricIds.length >= 4, true)
+  for (const metricId of mustSeeMetricIds) {
+    assert.equal(abMustSeeMetricTrends.some((trend) => trend.metricId === metricId), true, `missing must-see trend for ${metricId}`)
+  }
+})
+
+test('feature mock data covers statuses, version types, publish plans, whitelists, and logs', () => {
+  const featureIds = new Set(abFeatureFlags.map((feature) => feature.featureId))
+  const versionFeatureIds = new Set(abFeatureVersions.map((version) => version.featureId))
+  assert.equal(abFeatureFlags.length >= 18, true, 'feature table should have enough rows for paging and filtering')
+  assert.equal(abFeatureFlags.filter((feature) => feature.appId === 'app_news').length >= 14, true, 'app_news should have rich feature rows')
+  assert.equal(new Set(abFeatureFlags.map((feature) => feature.appId)).size >= 3, true, 'feature data should cover multiple apps')
+  for (const feature of abFeatureFlags) {
+    assert.equal(versionFeatureIds.has(feature.featureId), true, `missing versions for ${feature.featureId}`)
+    if (feature.currentVersionId) {
+      assert.equal(abFeatureVersions.some((version) => version.versionId === feature.currentVersionId), true, `missing current version for ${feature.featureId}`)
+    }
+  }
+  for (const version of abFeatureVersions) {
+    assert.equal(featureIds.has(version.featureId), true, `version ${version.versionId} should point to an existing feature`)
+    assert.equal(version.variants.length > 0, true, `version ${version.versionId} should have variants`)
+    assert.ok(version.defaultRule, `version ${version.versionId} should have default rule`)
+  }
+
+  for (const terminalType of ['client', 'server']) {
+    assert.equal(abFeatureFlags.some((feature) => feature.terminalType === terminalType), true, `missing ${terminalType} feature`)
+  }
+  for (const featureType of ['public', 'private']) {
+    assert.equal(abFeatureFlags.some((feature) => feature.featureType === featureType), true, `missing ${featureType} feature`)
+  }
+  for (const status of ['enabled', 'disabled']) {
+    assert.equal(abFeatureFlags.some((feature) => feature.status === status), true, `missing ${status} feature`)
+  }
+  for (const publishStatus of ['unpublished', 'pending_publish', 'gray', 'publish_confirm', 'full', 'rolled_back', 'disabled', 'canceled']) {
+    assert.equal(abFeatureFlags.some((feature) => feature.publishStatus === publishStatus), true, `missing ${publishStatus} feature`)
+  }
+  for (const variantType of ['boolean', 'string', 'number', 'json']) {
+    assert.equal(abFeatureVersions.some((version) => version.variantType === variantType), true, `missing ${variantType} feature version`)
+  }
+  for (const versionStatus of ['unpublished', 'pending_publish', 'gray', 'publish_confirm', 'full', 'rolled_back', 'disabled', 'canceled']) {
+    assert.equal(abFeatureVersions.some((version) => version.versionStatus === versionStatus), true, `missing ${versionStatus} feature version`)
+  }
+  assert.equal(abFeatureVersions.some((version) => version.audienceRules.some((rule) => rule.deliveryType === 'multi_variant')), true)
+  assert.equal(abFeatureVersions.some((version) => version.audienceRules.some((rule) => rule.deliveryType === 'no_value')), true)
+
+  for (const planStatus of ['pending', 'running', 'completed', 'canceled', 'rolled_back', 'failed']) {
+    assert.equal(abPublishPlans.some((plan) => plan.status === planStatus), true, `missing ${planStatus} publish plan`)
+  }
+  for (const whitelistStatus of ['active', 'expired', 'terminated']) {
+    assert.equal(abWhitelistTests.some((item) => item.status === whitelistStatus), true, `missing ${whitelistStatus} whitelist`)
+  }
+  assert.equal(abWhitelistTests.some((item) => item.versionMode === 'custom' && item.customVariants?.length), true)
+  for (const action of ['create_feature', 'publish_feature', 'cancel_feature_publish', 'rollback_feature', 'feature_disable', 'schedule_feature_publish_failed']) {
+    assert.equal(abOperationLogs.some((log) => log.action === action), true, `missing ${action} operation log`)
+  }
+})
 
 test('guards experiment state transitions and uniform diversion start gate', () => {
   assert.equal(getExperimentActionAvailability('DRAFT', 'submit_debug').nextStatus, 'DEBUGGING')

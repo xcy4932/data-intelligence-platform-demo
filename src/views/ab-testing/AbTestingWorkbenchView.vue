@@ -38,6 +38,7 @@ import {
 } from 'naive-ui'
 import {
   AddCircleOutline,
+  ArrowBackOutline,
   CopyOutline,
   DownloadOutline,
   EllipsisHorizontalOutline,
@@ -104,6 +105,10 @@ const pageHeaders: Record<string, { title: string; description: string }> = {
   experiments: {
     title: '实验管理',
     description: '实验列表、详情、生命周期操作、命中诊断、扩缩量和审计日志。',
+  },
+  experimentDetail: {
+    title: '实验详情',
+    description: '查看单个实验的基础信息、运行配置、版本分流、扩缩量和安全编辑。',
   },
   create: {
     title: '实验创建',
@@ -309,6 +314,57 @@ const experimentTypeCatalog: Array<{
     requirements: ['绑定广告账户', '完成外部平台授权校验'],
   },
 ]
+
+const experimentTypeCreateConfig: Record<AbExperimentType, { enabled: boolean; unavailableReason: string }> = {
+  CLIENT_CODE: {
+    enabled: true,
+    unavailableReason: '当前应用未检测到客户端 SDK 接入，无法创建客户端实验。',
+  },
+  SERVER_CODE: {
+    enabled: true,
+    unavailableReason: '当前应用未接入服务端 SDK 或分流 Agent。',
+  },
+  VISUAL: {
+    enabled: true,
+    unavailableReason: '当前应用未开启可视化能力。',
+  },
+  SPLIT_URL: {
+    enabled: true,
+    unavailableReason: '当前应用未配置落地页跳转能力。',
+  },
+  PUSH: {
+    enabled: true,
+    unavailableReason: '当前应用未配置推送通道。',
+  },
+  MAB: {
+    enabled: true,
+    unavailableReason: '当前应用未开启 MAB 智能调优能力。',
+  },
+  MVT: {
+    enabled: true,
+    unavailableReason: '当前应用访问量不足，暂不建议创建 MVT。',
+  },
+  PERSONALIZATION_WEB: {
+    enabled: true,
+    unavailableReason: '当前应用未开通 Web 个性化策略能力。',
+  },
+  PERSONALIZATION_CODE: {
+    enabled: true,
+    unavailableReason: '当前应用未开通编程个性化策略能力。',
+  },
+  PARENT_CHILD: {
+    enabled: true,
+    unavailableReason: '当前应用暂无可用运行中父实验。',
+  },
+  REVERSE: {
+    enabled: true,
+    unavailableReason: '当前应用暂无可关联的已完成实验。',
+  },
+  AD: {
+    enabled: true,
+    unavailableReason: '当前广告账户未完成外部平台授权。',
+  },
+}
 
 const createSteps = [
   '实验类型',
@@ -753,7 +809,7 @@ function updateFlexibleDraftValue(metricId: EntityId, propertyId: EntityId, valu
   draftFlexibleMetricValues.value = {
     ...draftFlexibleMetricValues.value,
     [metricId]: {
-      ...(draftFlexibleMetricValues.value[metricId] ?? {}),
+      ...draftFlexibleMetricValues.value[metricId],
       [propertyId]: value,
     },
   }
@@ -764,7 +820,7 @@ function seedDraftFlexibleDefaults() {
   for (const metric of draftMetricSnapshots.value) {
     const properties = metricFlexibleProperties(metric)
     if (!properties.length) continue
-    nextValues[metric.id] = { ...(nextValues[metric.id] ?? {}) }
+    nextValues[metric.id] = { ...nextValues[metric.id] }
     for (const property of properties) {
       if (nextValues[metric.id]?.[property.id] === undefined) nextValues[metric.id]![property.id] = flexibleDefaultText(property)
     }
@@ -1104,24 +1160,27 @@ const featureRouteForbidden = computed(() =>
 
 const filteredFeatureFlags = computed(() => {
   const keyword = featureKeyword.value.trim().toLowerCase()
-  return visibleFeatureFlags.value.filter((feature) => {
-    const keywordMatched =
-      !keyword ||
-      feature.name.toLowerCase().includes(keyword) ||
-      feature.key.toLowerCase().includes(keyword) ||
-      feature.description.toLowerCase().includes(keyword) ||
-      feature.tags.some((tag) => tag.toLowerCase().includes(keyword))
-    const appMatched = !featureFilterAppId.value || feature.appId === featureFilterAppId.value
-    const statusMatched = !featureFilterStatuses.value.length || featureFilterStatuses.value.includes(feature.status)
-    const publishMatched =
-      !featureFilterPublishStatuses.value.length || featureFilterPublishStatuses.value.includes(feature.publishStatus)
-    const terminalMatched =
-      !featureFilterTerminalTypes.value.length || featureFilterTerminalTypes.value.includes(feature.terminalType)
-    const tagMatched =
-      !featureFilterTags.value.length || featureFilterTags.value.every((tag) => feature.tags.includes(tag))
-    const ownerMatched = !featureFilterOwnerId.value || feature.owners.includes(featureFilterOwnerId.value)
-    return keywordMatched && appMatched && statusMatched && publishMatched && terminalMatched && tagMatched && ownerMatched
-  })
+  return visibleFeatureFlags.value
+    .filter((feature) => {
+      const keywordMatched =
+        !keyword ||
+        feature.name.toLowerCase().includes(keyword) ||
+        feature.key.toLowerCase().includes(keyword) ||
+        feature.description.toLowerCase().includes(keyword) ||
+        feature.tags.some((tag) => tag.toLowerCase().includes(keyword))
+      const appMatched = !featureFilterAppId.value || feature.appId === featureFilterAppId.value
+      const statusMatched = !featureFilterStatuses.value.length || featureFilterStatuses.value.includes(feature.status)
+      const publishMatched =
+        !featureFilterPublishStatuses.value.length || featureFilterPublishStatuses.value.includes(feature.publishStatus)
+      const terminalMatched =
+        !featureFilterTerminalTypes.value.length || featureFilterTerminalTypes.value.includes(feature.terminalType)
+      const tagMatched =
+        !featureFilterTags.value.length || featureFilterTags.value.every((tag) => feature.tags.includes(tag))
+      const ownerMatched = !featureFilterOwnerId.value || feature.owners.includes(featureFilterOwnerId.value)
+      return keywordMatched && appMatched && statusMatched && publishMatched && terminalMatched && tagMatched && ownerMatched
+    })
+    .slice()
+    .sort((first, second) => new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime())
 })
 
 const pagedFeatureFlags = computed(() => {
@@ -1823,6 +1882,41 @@ function getFeaturePublishActionLabel(feature: FeatureFlag) {
   return '发布'
 }
 
+function getFeatureRowActionOptions(feature: FeatureFlag) {
+  const publishLabel = getFeaturePublishActionLabel(feature)
+  return [
+    { label: '编辑版本', key: 'versions', disabled: !canEditFeature(feature) },
+    { label: '复制为新 Feature', key: 'copy', disabled: !canOperateFeature(feature, 'create_feature') },
+    { label: '创建实验', key: 'experiment', disabled: !canCreateExperimentFromFeature(feature) },
+    { type: 'divider', key: 'divider_flow' },
+    { label: '白名单', key: 'whitelist', disabled: !canOperateFeature(feature, 'create_feature') },
+    {
+      label: publishLabel || '发布 / 回滚',
+      key: 'publish',
+      disabled: !canOperateFeature(feature, 'publish_feature') || !publishLabel,
+    },
+    { label: '生命周期', key: 'lifecycle' },
+    { label: '操作日志', key: 'logs' },
+    { type: 'divider', key: 'divider_manage' },
+    { label: '权限', key: 'permission', disabled: !canOperateFeature(feature, 'manage_feature_permission') },
+    { label: '发布历史', key: 'history' },
+    { label: '删除', key: 'delete', disabled: !canDeleteFeature(feature) },
+  ]
+}
+
+function handleFeatureRowActionSelect(key: string | number, feature: FeatureFlag) {
+  if (key === 'versions') openFeatureSubPage('versions', feature.featureId)
+  else if (key === 'copy') copyFeatureToCreateDraft(feature)
+  else if (key === 'experiment') createExperimentFromFeature(feature)
+  else if (key === 'whitelist') openFeatureSubPage('whitelist', feature.featureId)
+  else if (key === 'publish') openFeaturePublish(feature)
+  else if (key === 'lifecycle') openFeatureSubPage('lifecycle', feature.featureId)
+  else if (key === 'logs') openFeatureSubPage('logs', feature.featureId)
+  else if (key === 'permission') openFeaturePermissionModal(feature)
+  else if (key === 'history') openFeatureHistory(feature)
+  else if (key === 'delete') void changeFeatureLifecycle('delete', feature)
+}
+
 const filteredSelectedWhitelistTests = computed(() => {
   const keyword = whitelistKeyword.value.trim().toLowerCase()
   return selectedWhitelistTests.value.filter((test) => {
@@ -1894,7 +1988,7 @@ function getWhitelistRuleUserText(ruleId: EntityId) {
 }
 
 function updateWhitelistRuleUsers(ruleId: EntityId, value: string) {
-  const nextRuleUserIds = { ...(whitelistDraft.value.ruleUserIds ?? {}) }
+  const nextRuleUserIds = { ...whitelistDraft.value.ruleUserIds }
   const userIds = value.split(',').map((item) => item.trim()).filter(Boolean)
   if (userIds.length) nextRuleUserIds[ruleId] = userIds
   else delete nextRuleUserIds[ruleId]
@@ -1903,7 +1997,7 @@ function updateWhitelistRuleUsers(ruleId: EntityId, value: string) {
 }
 
 function setWhitelistRuleEnabled(ruleId: EntityId, checked: boolean) {
-  const nextRuleUserIds = { ...(whitelistDraft.value.ruleUserIds ?? {}) }
+  const nextRuleUserIds = { ...whitelistDraft.value.ruleUserIds }
   if (checked) {
     nextRuleUserIds[ruleId] = nextRuleUserIds[ruleId] ?? []
   } else {
@@ -2960,17 +3054,6 @@ const sensitiveCreateRequirements = computed(() => {
 
 const sensitiveCreateAvailable = computed(() => sensitiveCreateRequirements.value.every((item) => item.passed))
 
-const sensitiveTaskStageRows = computed(() => {
-  const task = selectedSensitiveTask.value
-  const stages: SensitiveInsightTask['stage'][] = ['data_preparing', 'model_training', 'model_predicting', 'result_output']
-  const currentIndex = task ? stages.indexOf(task.stage) : -1
-  return stages.map((stage, index) => ({
-    stage,
-    label: sensitiveStageLabels[stage],
-    status: !task ? 'wait' : index < currentIndex || task.status === 'completed' ? 'finish' : index === currentIndex ? 'process' : 'wait',
-  }))
-})
-
 const sensitiveFeatureImportanceRows = computed(() =>
   (selectedSensitiveTask.value?.result?.topFeatures ?? ['金币余额分层', '近 7 日活跃天数', '广告入口来源', '城市']).map((feature, index) => ({
     feature,
@@ -3251,17 +3334,6 @@ const roleSubjectOptions = [
   { label: '广告账户管理员', value: 'role_ad_admin' },
   { label: '看板 Owner', value: 'role_board_owner' },
 ]
-const appCapability = {
-  clientSdk: true,
-  serverSdk: true,
-  visualEditor: true,
-  pushChannel: false,
-  mvtCapacity: false,
-  personalization: true,
-  parentExperiment: true,
-  reverseExperiment: true,
-  adAuthorized: false,
-}
 const businessLineOptions = [
   { label: '增长业务线', value: 'biz_growth' },
   { label: '商业化业务线', value: 'biz_monetization' },
@@ -3279,28 +3351,13 @@ const draftDurationWarning = computed(() =>
 const experimentTypes = computed(() =>
   experimentTypeCatalog.map((item) => {
     const createGranted = permissionContext.value.permissions.experiment_create === true
+    const typeConfig = experimentTypeCreateConfig[item.value]
     const reason =
       !createGranted
         ? '当前用户缺少 experiment_create 权限。'
-        : item.value === 'CLIENT_CODE' && !appCapability.clientSdk
-          ? '当前应用未检测到客户端 SDK 接入，无法创建客户端实验。'
-          : item.value === 'SERVER_CODE' && !appCapability.serverSdk
-            ? '当前应用未接入服务端 SDK 或分流 Agent。'
-            : item.value === 'VISUAL' && !appCapability.visualEditor
-              ? '当前应用未开启可视化能力。'
-              : item.value === 'PUSH' && !appCapability.pushChannel
-                ? '当前应用未配置推送通道。'
-                : item.value === 'MVT' && !appCapability.mvtCapacity
-                  ? '当前应用访问量不足，暂不建议创建 MVT。'
-                  : ['PERSONALIZATION_WEB', 'PERSONALIZATION_CODE'].includes(item.value) && !appCapability.personalization
-                    ? '当前应用未开通个性化策略能力。'
-                    : item.value === 'PARENT_CHILD' && !appCapability.parentExperiment
-                      ? '当前应用暂无可用运行中父实验。'
-                      : item.value === 'REVERSE' && !appCapability.reverseExperiment
-                        ? '当前应用暂无可关联的已完成实验。'
-                        : item.value === 'AD' && !appCapability.adAuthorized
-                          ? '当前广告账户未完成外部平台授权。'
-                          : ''
+        : !typeConfig.enabled
+          ? typeConfig.unavailableReason
+          : ''
     return {
       ...item,
       label: typeLabels[item.value],
@@ -3819,6 +3876,9 @@ const allPagedExperimentsSelected = computed(
     pagedExperiments.value.length > 0 &&
     pagedExperiments.value.every((experiment) => selectedExperimentIds.value.includes(experiment.id)),
 )
+const selectedExperimentLogs = computed(() =>
+  operationLogs.value.filter((log) => log.objectId === selectedExperimentId.value).slice(0, 6),
+)
 
 type ExperimentUiAction =
   | AbExperimentAction
@@ -4003,6 +4063,23 @@ function getMoreActionOptions(experiment: Experiment) {
     key: action,
     disabled: rowActionDisabled(experiment, action),
   }))
+}
+
+function getInlineRowActions(experiment: Experiment) {
+  return rowActionMatrix[experiment.status].primary.slice(0, 1)
+}
+
+function getOverflowRowActionOptions(experiment: Experiment) {
+  return [...rowActionMatrix[experiment.status].primary.slice(1), ...rowActionMatrix[experiment.status].more].map((action) => ({
+    label: actionLabels[action],
+    key: action,
+    disabled: rowActionDisabled(experiment, action),
+  }))
+}
+
+function openExperimentDetail(experiment: Experiment) {
+  selectedExperimentId.value = experiment.id
+  void router.push(`/ab-testing/experiments/${experiment.id}`)
 }
 
 function openCreateWizard() {
@@ -5818,7 +5895,8 @@ async function handleExperimentUiAction(experiment: Experiment, action: Experime
   if (action === 'edit') {
     selectedExperimentId.value = experiment.id
     await abStore.loadPlanningBundle(experiment.id)
-    message.info('已载入实验配置，可在详情区做安全编辑或进入创建页复制调整')
+    message.info('已载入实验配置，可在详情页做安全编辑')
+    void router.push(`/ab-testing/experiments/${experiment.id}`)
     return
   }
   if (action === 'solidify_feature') {
@@ -5840,7 +5918,8 @@ async function handleExperimentUiAction(experiment: Experiment, action: Experime
   }
   if (action === 'history') {
     selectedExperimentId.value = experiment.id
-    message.info('操作历史已在实验详情与首页时间线中同步展示')
+    message.info('操作历史已在实验详情页同步展示')
+    void router.push(`/ab-testing/experiments/${experiment.id}`)
     return
   }
   if (action === 'parent_child' || action === 'reverse') {
@@ -6951,6 +7030,7 @@ function isReportTab(value: unknown): value is ReportPrimaryTab {
 }
 
 function syncReportRouteState() {
+  if (activePage.value !== 'reports') return
   const experimentId = String(route.params.experimentId ?? route.query.experimentId ?? '')
   if (experimentId && experimentId !== selectedReportExperimentId.value) {
     selectedReportExperimentId.value = experimentId
@@ -6962,6 +7042,14 @@ function syncReportRouteState() {
       activeReportTab.value = tab
       pendingReportTab.value = null
     }
+  }
+}
+
+function syncExperimentDetailRouteState() {
+  if (activePage.value !== 'experimentDetail') return
+  const experimentId = String(route.params.experimentId ?? '')
+  if (experimentId && experimentId !== selectedExperimentId.value) {
+    selectedExperimentId.value = experimentId
   }
 }
 
@@ -7071,6 +7159,24 @@ watch(
 )
 
 watch(
+  () => [activePage.value, route.params.experimentId, experiments.value.length],
+  () => {
+    syncExperimentDetailRouteState()
+    const experimentId = String(route.params.experimentId ?? '')
+    if (
+      activePage.value === 'experimentDetail' &&
+      experiments.value.length > 0 &&
+      experimentId &&
+      !experiments.value.some((experiment) => experiment.id === experimentId)
+    ) {
+      message.warning('未找到该实验，已返回实验列表')
+      void router.replace('/ab-testing/experiments')
+    }
+  },
+  { immediate: true },
+)
+
+watch(
   () => route.params.featureId,
   (featureId) => {
     if (typeof featureId === 'string' && featureId) {
@@ -7105,6 +7211,7 @@ onMounted(async () => {
   window.addEventListener('beforeunload', handleBeforeUnload)
   await loadWorkspace()
   syncReportRouteState()
+  syncExperimentDetailRouteState()
   abStore.startAsyncTaskPolling()
 })
 
@@ -7281,9 +7388,7 @@ onBeforeUnmount(() => {
           </n-space>
         </n-card>
 
-        <n-grid :cols="3" :x-gap="16" :y-gap="16" responsive="screen">
-          <n-gi :span="2">
-            <n-card title="实验列表" :bordered="false">
+        <n-card title="实验列表" :bordered="false">
               <n-table :bordered="false" :single-line="false" size="small">
                 <thead>
                   <tr>
@@ -7313,7 +7418,7 @@ onBeforeUnmount(() => {
                       />
                     </td>
                     <td>
-                      <button class="link-button" @click="selectedExperimentId = experiment.id">
+                      <button class="link-button" @click="openExperimentDetail(experiment)">
                         {{ experiment.name }}
                       </button>
                       <span class="cell-subtitle">{{ experiment.owner.name }} · 创建 {{ formatDateTime(experiment.createdAt) }}</span>
@@ -7345,8 +7450,8 @@ onBeforeUnmount(() => {
                       </n-space>
                     </td>
                     <td>
-                      <n-space size="small">
-                        <n-tooltip v-for="action in rowActionMatrix[experiment.status].primary" :key="action">
+                      <n-space class="experiment-row-actions" size="small">
+                        <n-tooltip v-for="action in getInlineRowActions(experiment)" :key="action">
                           <template #trigger>
                             <n-button
                               size="small"
@@ -7361,13 +7466,14 @@ onBeforeUnmount(() => {
                         </n-tooltip>
                         <n-dropdown
                           trigger="click"
-                          :options="getMoreActionOptions(experiment)"
+                          :options="getOverflowRowActionOptions(experiment)"
                           @select="(key) => handleMoreAction(experiment, key)"
                         >
                           <n-button size="small" secondary>
                             <template #icon>
                               <n-icon><EllipsisHorizontalOutline /></n-icon>
                             </template>
+                            更多
                           </n-button>
                         </n-dropdown>
                       </n-space>
@@ -7385,85 +7491,55 @@ onBeforeUnmount(() => {
                   show-size-picker
                 />
               </n-space>
-            </n-card>
-          </n-gi>
+        </n-card>
+      </section>
 
-          <n-gi>
-            <n-card title="实验详情" :bordered="false">
-              <template v-if="selectedExperiment">
-                <n-descriptions :column="1" label-placement="left" size="small">
-                  <n-descriptions-item label="实验 ID">{{ selectedExperiment.id }}</n-descriptions-item>
-                  <n-descriptions-item label="目标">{{ selectedExperiment.goal }}</n-descriptions-item>
-                  <n-descriptions-item label="风险">{{ selectedExperiment.riskNote ?? '无' }}</n-descriptions-item>
-                  <n-descriptions-item label="指标">
-                    <n-space size="small">
-                      <n-tag v-for="metricId in selectedExperiment.metricIds" :key="metricId" size="small">
-                        {{ getMetricName(metricId) }}
-                      </n-tag>
-                    </n-space>
-                  </n-descriptions-item>
-                </n-descriptions>
-                <n-divider />
+      <section v-else-if="activePage === 'experimentDetail'" class="ab-section-stack">
+        <template v-if="selectedExperiment">
+          <n-card :title="selectedExperiment.name" :bordered="false">
+            <template #header-extra>
+              <n-space>
+                <n-button secondary @click="router.push('/ab-testing/experiments')">返回列表</n-button>
+                <n-button secondary @click="handleExperimentUiAction(selectedExperiment, 'view_report')">查看报告</n-button>
+              </n-space>
+            </template>
+            <n-descriptions :column="3" label-placement="left" size="small">
+              <n-descriptions-item label="实验 ID">{{ selectedExperiment.id }}</n-descriptions-item>
+              <n-descriptions-item label="类型">{{ typeLabels[selectedExperiment.type] }}</n-descriptions-item>
+              <n-descriptions-item label="状态">
+                <n-tag :type="statusType(selectedExperiment.status)" size="small">
+                  {{ statusLabels[selectedExperiment.status] }}
+                </n-tag>
+              </n-descriptions-item>
+              <n-descriptions-item label="负责人">{{ selectedExperiment.owner.name }}</n-descriptions-item>
+              <n-descriptions-item label="可见性">
+                {{ selectedExperiment.visibility === 'PUBLIC' ? '公共' : '私有' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="流量">{{ formatPercent(selectedExperiment.trafficRatio) }}</n-descriptions-item>
+              <n-descriptions-item label="目标">{{ selectedExperiment.goal }}</n-descriptions-item>
+              <n-descriptions-item label="风险">{{ selectedExperiment.riskNote ?? '无' }}</n-descriptions-item>
+              <n-descriptions-item label="运行时间">
+                {{ selectedExperiment.startedAt ? formatDateTime(selectedExperiment.startedAt) : '-' }}
+                / {{ selectedExperiment.endedAt ? formatDateTime(selectedExperiment.endedAt) : `${selectedExperiment.durationDays} 天` }}
+              </n-descriptions-item>
+              <n-descriptions-item label="指标">
                 <n-space size="small">
-                  <n-button
-                    size="small"
-                    secondary
-                    :disabled="!getActionAvailability(selectedExperiment, 'freeze').available"
-                    @click="handleExperimentAction(selectedExperiment, 'freeze')"
-                  >
-                    冻结
-                  </n-button>
-                  <n-button
-                    size="small"
-                    secondary
-                    :disabled="!getActionAvailability(selectedExperiment, 'resume').available"
-                    @click="handleExperimentAction(selectedExperiment, 'resume')"
-                  >
-                    恢复
-                  </n-button>
-                  <n-button
-                    size="small"
-                    secondary
-                    :disabled="!getActionAvailability(selectedExperiment, 'restart').available"
-                    @click="handleExperimentAction(selectedExperiment, 'restart')"
-                  >
-                    重启
-                  </n-button>
-                  <n-button
-                    size="small"
-                    secondary
-                    :disabled="rowActionDisabled(selectedExperiment, 'solidify_feature')"
-                    @click="handleExperimentUiAction(selectedExperiment, 'solidify_feature')"
-                  >
-                    固化至 Feature
-                  </n-button>
+                  <n-tag v-for="metricId in selectedExperiment.metricIds" :key="metricId" size="small">
+                    {{ getMetricName(metricId) }}
+                  </n-tag>
                 </n-space>
-                <n-divider />
-                <div class="mini-section">
-                  <strong>运行中安全编辑</strong>
-                  <n-input v-model:value="safeEditDraft.name" placeholder="实验名称" />
-                  <n-input v-model:value="safeEditDraft.riskNote" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" />
-                  <n-input v-model:value="safeEditDraft.tagsText" placeholder="标签，逗号分隔" />
-                  <n-button secondary block @click="saveSafeExperimentEdit">保存安全编辑</n-button>
-                </div>
-                <n-divider />
-                <div class="mini-section">
-                  <strong>扩缩量</strong>
-                  <n-input-number
-                    v-model:value="scaleTrafficDraft.targetTrafficRatio"
-                    :min="1"
-                    :max="100"
-                    style="width: 100%"
-                  />
-                  <n-input-number
-                    v-model:value="scaleTrafficDraft.smoothDurationMinutes"
-                    :min="10"
-                    :max="1440"
-                    style="width: 100%"
-                  />
-                  <n-button secondary block @click="scaleSelectedExperimentTraffic">创建扩缩量任务</n-button>
-                </div>
-                <n-divider />
+              </n-descriptions-item>
+              <n-descriptions-item label="标签">
+                <n-space size="small">
+                  <n-tag v-for="tag in selectedExperiment.tags" :key="tag" size="small">{{ tag }}</n-tag>
+                </n-space>
+              </n-descriptions-item>
+            </n-descriptions>
+          </n-card>
+
+          <n-grid :cols="3" :x-gap="16" :y-gap="16" responsive="screen">
+            <n-gi :span="2">
+              <n-card title="版本与分流" :bordered="false">
                 <div class="mini-section">
                   <strong>版本参数</strong>
                   <div v-for="variant in planningBundle?.variants" :key="variant.id" class="variant-line">
@@ -7490,7 +7566,9 @@ onBeforeUnmount(() => {
                       </n-button>
                     </n-space>
                   </div>
+                  <n-empty v-if="!planningBundle?.variants.length" size="small" description="暂无版本参数" />
                 </div>
+                <n-divider />
                 <div class="mini-section">
                   <strong>分流配置</strong>
                   <p>
@@ -7498,6 +7576,7 @@ onBeforeUnmount(() => {
                     {{ planningBundle?.diversionConfig?.exposureMode ?? '-' }}
                   </p>
                 </div>
+                <n-divider />
                 <div class="mini-section">
                   <strong>平滑生效</strong>
                   <template v-if="planningBundle?.smoothTask">
@@ -7546,11 +7625,95 @@ onBeforeUnmount(() => {
                   </template>
                   <p v-else>未启用</p>
                 </div>
-              </template>
-              <n-empty v-else description="暂无实验" />
-            </n-card>
-          </n-gi>
-        </n-grid>
+              </n-card>
+            </n-gi>
+
+            <n-gi>
+              <n-card title="运行操作" :bordered="false">
+                <n-space size="small">
+                  <n-button
+                    size="small"
+                    secondary
+                    :disabled="!getActionAvailability(selectedExperiment, 'freeze').available"
+                    @click="handleExperimentAction(selectedExperiment, 'freeze')"
+                  >
+                    冻结
+                  </n-button>
+                  <n-button
+                    size="small"
+                    secondary
+                    :disabled="!getActionAvailability(selectedExperiment, 'resume').available"
+                    @click="handleExperimentAction(selectedExperiment, 'resume')"
+                  >
+                    恢复
+                  </n-button>
+                  <n-button
+                    size="small"
+                    secondary
+                    :disabled="!getActionAvailability(selectedExperiment, 'restart').available"
+                    @click="handleExperimentAction(selectedExperiment, 'restart')"
+                  >
+                    重启
+                  </n-button>
+                  <n-button
+                    size="small"
+                    secondary
+                    :disabled="rowActionDisabled(selectedExperiment, 'solidify_feature')"
+                    @click="handleExperimentUiAction(selectedExperiment, 'solidify_feature')"
+                  >
+                    固化至 Feature
+                  </n-button>
+                </n-space>
+                <n-divider />
+                <div class="mini-section">
+                  <strong>运行中安全编辑</strong>
+                  <n-input v-model:value="safeEditDraft.name" placeholder="实验名称" />
+                  <n-input v-model:value="safeEditDraft.goal" type="textarea" :autosize="{ minRows: 2, maxRows: 3 }" placeholder="实验目标" />
+                  <n-input v-model:value="safeEditDraft.riskNote" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="风险说明" />
+                  <n-input v-model:value="safeEditDraft.tagsText" placeholder="标签，逗号分隔" />
+                  <n-button secondary block @click="saveSafeExperimentEdit">保存安全编辑</n-button>
+                </div>
+                <n-divider />
+                <div class="mini-section">
+                  <strong>扩缩量</strong>
+                  <n-input-number
+                    v-model:value="scaleTrafficDraft.targetTrafficRatio"
+                    :min="1"
+                    :max="100"
+                    style="width: 100%"
+                  />
+                  <n-input-number
+                    v-model:value="scaleTrafficDraft.smoothDurationMinutes"
+                    :min="10"
+                    :max="1440"
+                    style="width: 100%"
+                  />
+                  <n-button secondary block @click="scaleSelectedExperimentTraffic">创建扩缩量任务</n-button>
+                </div>
+              </n-card>
+            </n-gi>
+          </n-grid>
+
+          <n-card title="最近操作" :bordered="false">
+            <n-timeline v-if="selectedExperimentLogs.length">
+              <n-timeline-item
+                v-for="log in selectedExperimentLogs"
+                :key="log.id"
+                :title="`${log.operatorName} · ${log.action}`"
+                :content="log.objectId"
+                :time="formatDateTime(log.createdAt)"
+              />
+            </n-timeline>
+            <n-empty v-else description="暂无操作日志" />
+          </n-card>
+        </template>
+        <n-card v-else :bordered="false">
+          <n-empty description="未找到实验">
+            <template #extra>
+              <n-button secondary @click="router.push('/ab-testing/experiments')">返回实验列表</n-button>
+            </template>
+          </n-empty>
+        </n-card>
       </section>
 
       <section v-else-if="activePage === 'create'" class="ab-section-stack">
@@ -9058,6 +9221,12 @@ onBeforeUnmount(() => {
               <strong>{{ reportOverview?.experimentName ?? selectedReportExperiment?.name ?? '请选择实验' }}</strong>
             </div>
             <n-space>
+              <n-button secondary @click="router.push('/ab-testing/experiments')">
+                <template #icon>
+                  <n-icon><ArrowBackOutline /></n-icon>
+                </template>
+                返回列表
+              </n-button>
               <n-select
                 v-model:value="selectedReportExperimentId"
                 :options="experiments.map((experiment) => ({ label: experiment.name, value: experiment.id }))"
@@ -10298,9 +10467,9 @@ onBeforeUnmount(() => {
                           <div>
                             <strong>{{ task.name }}</strong>
                             <span>
-                              {{ sensitiveStatusLabels[task.status] }} · {{ sensitiveStageLabels[task.stage] }} · {{ formatDateTime(task.createdAt) }}
+                              {{ sensitiveStatusLabels[task.status] }} · {{ sensitiveStageLabels[task.stage] }} · {{ formatDateTime(task.createdAt) }} · {{ task.progress }}%
                             </span>
-                            <n-progress type="line" :percentage="task.progress" :height="8" />
+                            <n-progress type="line" :percentage="task.progress" :height="8" :show-indicator="false" />
                           </div>
                           <div class="task-actions compact">
                             <n-button size="small" secondary @click="refreshSensitiveTask(task)">刷新</n-button>
@@ -10325,14 +10494,8 @@ onBeforeUnmount(() => {
                       <n-button secondary :disabled="!selectedSensitiveTask.result" @click="downloadSensitiveSegment">下载报告</n-button>
                     </div>
 
-                    <div class="sensitive-stage-row">
-                      <div v-for="stage in sensitiveTaskStageRows" :key="stage.stage" :class="stage.status">
-                        <span>{{ stage.label }}</span>
-                      </div>
-                    </div>
-
                     <template v-if="selectedSensitiveTask.result">
-                      <div class="preview-grid">
+                      <div class="preview-grid sensitive-result-summary">
                         <div>
                           <span>是否发现敏感人群</span>
                           <strong>{{ selectedSensitiveTask.result.discovered ? '是' : '否' }}</strong>
@@ -10572,34 +10735,20 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeFeatureSubPage === 'list'">
-          <n-card title="筛选搜索" :bordered="false">
-            <n-grid :cols="6" :x-gap="12" :y-gap="12" responsive="screen">
-              <n-gi>
-                <n-input v-model:value="featureKeyword" placeholder="名称 / Key / 描述" />
-              </n-gi>
-              <n-gi>
-                <n-select v-model:value="featureFilterAppId" clearable :options="featureAppOptions" placeholder="应用" />
-              </n-gi>
-              <n-gi>
-                <n-select v-model:value="featureFilterStatuses" multiple clearable :options="featureStatusOptions" placeholder="开关状态" />
-              </n-gi>
-              <n-gi>
-                <n-select v-model:value="featureFilterPublishStatuses" multiple clearable :options="featurePublishStatusOptions" placeholder="发布状态" />
-              </n-gi>
-              <n-gi>
-                <n-select v-model:value="featureFilterTerminalTypes" multiple clearable :options="featureTerminalOptions" placeholder="终端类型" />
-              </n-gi>
-              <n-gi>
-                <n-select v-model:value="featureFilterTags" multiple clearable :options="featureTagOptions" placeholder="标签" />
-              </n-gi>
-              <n-gi>
-                <n-space>
-                  <n-select v-model:value="featureFilterOwnerId" clearable :options="featureOwnerOptions" placeholder="Owner" style="width: 150px" />
-                  <n-button type="primary" secondary @click="queryFeatureList">查询</n-button>
-                  <n-button secondary @click="resetFeatureFilters">重置</n-button>
-                </n-space>
-              </n-gi>
-            </n-grid>
+          <n-card title="筛选搜索" :bordered="false" class="feature-filter-card">
+            <div class="feature-filter-row">
+              <n-input v-model:value="featureKeyword" size="small" clearable placeholder="名称 / Key / 描述" />
+              <n-select v-model:value="featureFilterAppId" size="small" clearable :options="featureAppOptions" placeholder="应用" />
+              <n-select v-model:value="featureFilterStatuses" size="small" multiple clearable :max-tag-count="1" :options="featureStatusOptions" placeholder="开关状态" />
+              <n-select v-model:value="featureFilterPublishStatuses" size="small" multiple clearable :max-tag-count="1" :options="featurePublishStatusOptions" placeholder="发布状态" />
+              <n-select v-model:value="featureFilterTerminalTypes" size="small" multiple clearable :max-tag-count="1" :options="featureTerminalOptions" placeholder="终端类型" />
+              <n-select v-model:value="featureFilterTags" size="small" multiple clearable :max-tag-count="1" :options="featureTagOptions" placeholder="标签" />
+              <n-select v-model:value="featureFilterOwnerId" size="small" clearable :options="featureOwnerOptions" placeholder="Owner" />
+              <div class="feature-filter-actions">
+                <n-button size="small" type="primary" secondary @click="queryFeatureList">查询</n-button>
+                <n-button size="small" secondary @click="resetFeatureFilters">重置</n-button>
+              </div>
+            </div>
           </n-card>
 
           <n-card title="Feature 表格" :bordered="false">
@@ -10660,59 +10809,19 @@ onBeforeUnmount(() => {
                   </td>
                   <td>{{ formatDateTime(feature.updatedAt) }}</td>
                   <td>
-                    <n-space size="small">
+                    <div class="feature-row-actions" @click.stop>
                       <n-button size="tiny" secondary @click.stop="openFeatureSubPage('detail', feature.featureId)">查看</n-button>
-                      <n-button
-                        size="tiny"
-                        secondary
-                        :disabled="!canEditFeature(feature)"
-                        @click.stop="openFeatureSubPage('versions', feature.featureId)"
+                      <n-dropdown
+                        trigger="click"
+                        :options="getFeatureRowActionOptions(feature)"
+                        @select="(key) => handleFeatureRowActionSelect(key, feature)"
                       >
-                        编辑
-                      </n-button>
-                      <n-button
-                        size="tiny"
-                        secondary
-                        :disabled="!canCreateExperimentFromFeature(feature)"
-                        @click.stop="createExperimentFromFeature(feature)"
-                      >
-                        创建实验
-                      </n-button>
-                      <n-button
-                        size="tiny"
-                        secondary
-                        :disabled="!canOperateFeature(feature, 'create_feature')"
-                        @click.stop="openFeatureSubPage('whitelist', feature.featureId)"
-                      >
-                        白名单
-                      </n-button>
-                      <n-button
-                        size="tiny"
-                        secondary
-                        :disabled="!canOperateFeature(feature, 'publish_feature') || !getFeaturePublishActionLabel(feature)"
-                        @click.stop="openFeaturePublish(feature)"
-                      >
-                        {{ getFeaturePublishActionLabel(feature) || '发布' }}
-                      </n-button>
-                      <n-button
-                        size="tiny"
-                        secondary
-                        :disabled="!canOperateFeature(feature, 'manage_feature_permission')"
-                        @click.stop="openFeaturePermissionModal(feature)"
-                      >
-                        权限
-                      </n-button>
-                      <n-button size="tiny" secondary @click.stop="openFeatureHistory(feature)">历史</n-button>
-                      <n-button
-                        size="tiny"
-                        secondary
-                        type="error"
-                        :disabled="!canDeleteFeature(feature)"
-                        @click.stop="changeFeatureLifecycle('delete', feature)"
-                      >
-                        删除
-                      </n-button>
-                    </n-space>
+                        <n-button size="tiny" secondary>
+                          <template #icon><n-icon><EllipsisHorizontalOutline /></n-icon></template>
+                          更多
+                        </n-button>
+                      </n-dropdown>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -14021,6 +14130,11 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
+.experiment-row-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
 .mini-section,
 .list-block,
 .tool-panel,
@@ -14343,6 +14457,44 @@ onBeforeUnmount(() => {
 
 .feature-page {
   gap: 16px;
+}
+
+.feature-filter-card :deep(.n-card-header) {
+  padding-bottom: 8px;
+}
+
+.feature-filter-card :deep(.n-card__content),
+.feature-filter-card :deep(.n-card-content) {
+  padding-top: 0;
+}
+
+.feature-filter-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.feature-filter-row > * {
+  flex: 0 0 132px;
+}
+
+.feature-filter-row > :first-child {
+  flex-basis: 210px;
+}
+
+.feature-filter-row > .feature-filter-actions {
+  flex: 0 0 auto;
+}
+
+.feature-filter-actions,
+.feature-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .feature-tabs-card :deep(.n-card__content),
@@ -15270,31 +15422,38 @@ onBeforeUnmount(() => {
 
 .temporary-retention-panel {
   display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 12px;
   border: 1px solid #dbeafe;
   border-radius: 8px;
   padding: 12px;
   background: #eff6ff;
+  overflow: hidden;
 }
 
 .temporary-retention-list,
 .temporary-retention-config {
   display: grid;
   gap: 10px;
+  min-width: 0;
   align-content: start;
 }
 
 .temporary-retention-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
 }
 
 .temporary-retention-filter-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr));
   gap: 10px;
+}
+
+.temporary-retention-grid > *,
+.temporary-retention-filter-grid > * {
+  min-width: 0;
 }
 
 .temporary-retention-actions {
@@ -15580,7 +15739,38 @@ onBeforeUnmount(() => {
 .mab-workspace,
 .sensitive-workspace {
   display: grid;
-  gap: 14px;
+  gap: 10px;
+}
+
+.report-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.report-panel-header > div {
+  min-width: 0;
+}
+
+.report-panel-header > .n-button,
+.report-panel-header > .n-space {
+  flex: 0 0 auto;
+}
+
+.sensitive-workspace.report-panel {
+  padding: 12px;
+}
+
+.sensitive-workspace > .report-panel-header {
+  align-items: center;
+}
+
+.sensitive-workspace .report-panel-header .report-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .mab-report-grid {
@@ -15654,8 +15844,8 @@ onBeforeUnmount(() => {
 .mab-parameter-grid,
 .sensitive-gate-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
 }
 
 .mab-parameter-card {
@@ -15683,41 +15873,52 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.sensitive-gate-grid .condition-pill {
+  gap: 8px;
+  padding: 8px 10px;
+}
+
 .sensitive-task {
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) auto;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.sensitive-task :deep(.n-progress) {
+  width: min(420px, 100%);
+  max-width: none;
+}
+
+.sensitive-task span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .task-actions.compact {
-  min-width: 220px;
-  grid-template-columns: repeat(3, auto);
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
   align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
-.sensitive-stage-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(110px, 1fr));
+.task-actions.compact .n-button {
+  flex: 0 0 auto;
+}
+
+.sensitive-result-summary {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
 }
 
-.sensitive-stage-row > div {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+.sensitive-result-summary > div {
   padding: 10px;
-  text-align: center;
-  color: #64748b;
-  background: #f8fafc;
-}
-
-.sensitive-stage-row .finish {
-  border-color: #bbf7d0;
-  color: #166534;
-  background: #f0fdf4;
-}
-
-.sensitive-stage-row .process {
-  border-color: #bfdbfe;
-  color: #1d4ed8;
-  background: #eff6ff;
+  gap: 6px;
 }
 
 .feature-importance-list > div {

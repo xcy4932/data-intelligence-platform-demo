@@ -1263,6 +1263,7 @@ export interface TrendPoint {
 }
 
 export interface FunnelReport {
+  experimentId?: EntityId
   metricId: EntityId
   compareVersionId: EntityId
   baselineVersionId?: EntityId
@@ -1278,6 +1279,7 @@ export interface FunnelReport {
 }
 
 export interface CohortReport {
+  experimentId?: EntityId
   metricId: EntityId
   retentionDays: number[]
   rows: Array<{
@@ -1317,6 +1319,7 @@ export interface TemporaryRetentionQueryResult extends CohortReport {
 }
 
 export interface HeatmapReport {
+  experimentId?: EntityId
   pageUrl: string
   type: 'click' | 'element'
   versions: Array<{

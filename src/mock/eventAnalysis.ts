@@ -886,8 +886,8 @@ export const mockAnomalyDiagnosis: AnomalyDiagnosis = {
       id: 'action-create-experiment',
       actionType: 'create_experiment',
       title: '创建 A/B 实验',
-      description: '验证原始入口、金币不足弹窗引导、任务中心奖励引导三种策略。',
-      targetRoute: '/ab-testing/create',
+      description: '进入实验列表后通过“新建实验”验证原始入口、金币不足弹窗引导、任务中心奖励引导三种策略。',
+      targetRoute: '/ab-testing/experiments',
       payload: {
         source: 'event_analysis',
         segmentId: 'seg_low_coin_ad_decline',

@@ -364,6 +364,18 @@ function readCreatedMockState(): CreatedMockState {
 }
 
 const abReportExportTasks: ReportExportTask[] = [
+  ...abReportOverviews.map((overview) => ({
+    id: `export_${overview.experimentId}_overview`,
+    experimentId: overview.experimentId,
+    reportType: 'overview' as const,
+    fileName: `${overview.experimentName}-overview-report.xlsx`,
+    status: 'success' as const,
+    progress: 100,
+    downloadUrl: `/mock-downloads/abtest/${overview.experimentId}/overview.xlsx`,
+    createdBy: currentOperator.id,
+    createdAt: overview.dataUpdatedAt,
+    updatedAt: overview.dataUpdatedAt,
+  })),
   {
     id: 'export_failed_metric_snapshot',
     experimentId: 'exp_feed_strategy',
@@ -2716,7 +2728,10 @@ const synthesizeMetricResults = (experimentId: EntityId): MetricStatisticResult[
 export const queryAbMetricResults = (experimentId: EntityId, filter?: Partial<ReportFilter>) => {
   const experiment = findExperiment(experimentId)
   const experimentMetricIds = new Set(experiment?.metricIds ?? [])
-  const baseMetrics = abMetricResults.filter((metric) => !experimentMetricIds.size || experimentMetricIds.has(metric.metricId))
+  const overviewMetrics = abReportOverviews.find((overview) => overview.experimentId === experimentId)?.coreMetricResults ?? []
+  const baseMetrics = overviewMetrics.length
+    ? overviewMetrics
+    : abMetricResults.filter((metric) => !experimentMetricIds.size || experimentMetricIds.has(metric.metricId))
   const metrics = (baseMetrics.length ? baseMetrics : synthesizeMetricResults(experimentId)).map((metric) => {
     const filterCount = filter?.filters?.length ?? 0
     const cohortCount = filter?.cohorts?.length ?? 0
@@ -2770,11 +2785,17 @@ export const queryAbMetricResults = (experimentId: EntityId, filter?: Partial<Re
   })
 }
 
-export const getAbFunnelReport = (metricId: EntityId) =>
-  resolveMock(abFunnelReports.find((report) => report.metricId === metricId))
+export const getAbFunnelReport = (metricId: EntityId, experimentId?: EntityId) =>
+  resolveMock(
+    abFunnelReports.find((report) => report.metricId === metricId && (!experimentId || report.experimentId === experimentId)) ??
+      (!experimentId ? abFunnelReports.find((report) => report.metricId === metricId) : undefined),
+  )
 
-export const getAbCohortReport = (metricId: EntityId) =>
-  resolveMock(abCohortReports.find((report) => report.metricId === metricId))
+export const getAbCohortReport = (metricId: EntityId, experimentId?: EntityId) =>
+  resolveMock(
+    abCohortReports.find((report) => report.metricId === metricId && (!experimentId || report.experimentId === experimentId)) ??
+      (!experimentId ? abCohortReports.find((report) => report.metricId === metricId) : undefined),
+  )
 
 function countMetricFilterTree(group: TemporaryRetentionQueryPayload['startFilterTree']): number {
   return group.conditions.length + group.groups.reduce((total, child) => total + countMetricFilterTree(child), 0)
@@ -2850,7 +2871,10 @@ export const queryAbTemporaryRetention = (
 export const getAbHeatmapReport = (experimentId?: EntityId) => {
   const experiment = experimentId ? findExperiment(experimentId) : undefined
   if (experiment && experiment.type !== 'VISUAL' && experiment.type !== 'SPLIT_URL') return resolveMock(undefined)
-  return resolveMock(abHeatmapReports[0])
+  return resolveMock(
+    (experimentId ? abHeatmapReports.find((report) => report.experimentId === experimentId) : undefined) ??
+      abHeatmapReports[0],
+  )
 }
 export const getAbMabReport = (experimentId: EntityId) =>
   resolveMock(abMabReports.find((report) => report.experimentId === experimentId))

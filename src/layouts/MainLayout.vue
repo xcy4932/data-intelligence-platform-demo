@@ -20,23 +20,27 @@ import {
 } from 'naive-ui'
 import {
   AnalyticsOutline,
-  BarChartOutline,
   BookmarkOutline,
-  BusinessOutline,
   GitNetworkOutline,
   HomeOutline,
   PeopleOutline,
   PieChartOutline,
-  SettingsOutline,
-  ShieldCheckmarkOutline,
   TrailSignOutline,
 } from '@vicons/ionicons5'
 import { adAnalysisService } from '@/services/adAnalysisService'
+import { organizationIdentityService } from '@/services/organizationIdentityService'
 import { groupProfilePermissionSet } from '@/mock/groupProfileInsight'
 import { multiDimPermissionSet } from '@/mock/multidimensionalFeatureAnalysis'
 import { profilePermissionSet } from '@/mock/profiles'
 import { segmentPermissionSet } from '@/mock/segments'
 import type { AdAccessDecision } from '@/types/adAnalysis'
+import type { IdentityAccessContext } from '@/types/organizationIdentity'
+import {
+  applyOrganizationIdentityAccessOptions,
+  getCurrentOrganizationIdentityAccessOptions,
+  getOrganizationIdentityServiceAccessOptions,
+  getVisibleOrganizationIdentityMenuItems,
+} from '@/utils/organizationIdentityPermissions'
 
 function renderIcon(icon: Component) {
   return () => h(NIcon, null, { default: () => h(icon) })
@@ -48,6 +52,7 @@ const router = useRouter()
 const message = useMessage()
 const adAccessLoaded = ref(false)
 const adAccessDecision = ref<AdAccessDecision | null>(null)
+const organizationIdentityAccessContext = ref<IdentityAccessContext | null>(null)
 
 onMounted(async () => {
   try {
@@ -63,6 +68,20 @@ onMounted(async () => {
   } finally {
     adAccessLoaded.value = true
   }
+})
+
+onMounted(async () => {
+  const accessOptions = getCurrentOrganizationIdentityAccessOptions()
+  const result = await organizationIdentityService.getIdentityAccessContext(
+    getOrganizationIdentityServiceAccessOptions(accessOptions),
+  )
+
+  if (result.success) {
+    organizationIdentityAccessContext.value = applyOrganizationIdentityAccessOptions(result.data, accessOptions)
+    return
+  }
+
+  message.warning(result.error.message)
 })
 
 const adAnalysisMenuEntries = computed<MenuOption[]>(() => {
@@ -85,24 +104,35 @@ const adAnalysisMenuEntries = computed<MenuOption[]>(() => {
   return [{ label: '广告投放分析', key: '/data-insight/ad-analysis' }]
 })
 
+const organizationIdentityMenuEntries = computed<MenuOption[]>(() => {
+  if (!organizationIdentityAccessContext.value) {
+    return []
+  }
+
+  return getVisibleOrganizationIdentityMenuItems(organizationIdentityAccessContext.value).map((item) => ({
+    label: item.label,
+    key: item.path,
+  }))
+})
+
+const organizationIdentityMenu = computed<MenuOption | null>(() => {
+  if (!organizationIdentityMenuEntries.value.length) {
+    return null
+  }
+
+  return {
+    label: '组织与身份中心',
+    key: 'organization-identity',
+    icon: renderIcon(PeopleOutline),
+    children: organizationIdentityMenuEntries.value,
+  }
+})
+
 const menuOptions = computed<MenuOption[]>(() => [
   {
     label: '首页驾驶舱',
     key: '/dashboard',
     icon: renderIcon(HomeOutline),
-  },
-  {
-    label: '数据资产管理',
-    key: 'data-assets',
-    icon: renderIcon(BusinessOutline),
-    children: [
-      { label: '数据目录', key: '/data-assets/catalog' },
-      { label: '域管理', key: '/data-assets/domain' },
-      { label: '血缘管理', key: '/data-assets/lineage' },
-      { label: '数据质量', key: '/data-assets/quality' },
-      { label: '数据字典', key: '/data-assets/dictionary' },
-      { label: '数据产品', key: '/data-assets/products' },
-    ],
   },
   {
     label: '可视化分析',
@@ -120,6 +150,7 @@ const menuOptions = computed<MenuOption[]>(() => [
       { label: '回收站', key: '/analysis-center/recycle-bin' },
     ],
   },
+  ...(organizationIdentityMenu.value ? [organizationIdentityMenu.value] : []),
   {
     label: '元数据管理',
     key: 'metadata',
@@ -236,26 +267,15 @@ const menuOptions = computed<MenuOption[]>(() => [
   },
   {
     label: '智能运营',
-    key: 'intelligent-operation',
+    key: '/intelligent-operation/overview',
     icon: renderIcon(TrailSignOutline),
-    children: [
-      { label: '运营概览', key: '/intelligent-operation/overview' },
-      { label: '人群圈选', key: '/intelligent-operation/audience' },
-      { label: '策略中心', key: '/intelligent-operation/strategies' },
-      { label: '运营任务', key: '/intelligent-operation/campaigns' },
-      { label: '触达中心', key: '/intelligent-operation/channels' },
-      { label: '效果评估', key: '/intelligent-operation/evaluation' },
-    ],
   },
   {
     label: 'A/B 测试',
     key: 'ab-testing',
     icon: renderIcon(AnalyticsOutline),
     children: [
-      { label: '实验概览', key: '/ab-testing/overview' },
       { label: '实验列表', key: '/ab-testing/experiments' },
-      { label: '实验创建', key: '/ab-testing/create' },
-      { label: '实验报告', key: '/ab-testing/reports' },
       { label: '指标管理', key: '/ab-testing/metrics' },
       { label: '配置管理', key: '/ab-testing/features' },
       { label: '流量管理', key: '/ab-testing/traffic' },
@@ -263,44 +283,32 @@ const menuOptions = computed<MenuOption[]>(() => [
       { label: '实验看板', key: '/ab-testing/boards' },
     ],
   },
-  {
-    label: '监控中心',
-    key: 'monitoring',
-    icon: renderIcon(BarChartOutline),
-    children: [
-      { label: '监控面板', key: '/monitoring/dashboard' },
-      { label: '数据摄取监控', key: '/monitoring/ingestion' },
-      { label: '指标监控', key: '/monitoring/metrics' },
-      { label: '告警配置', key: '/monitoring/alerts' },
-      { label: '日志浏览器', key: '/monitoring/logs' },
-    ],
-  },
-  {
-    label: '工作流审批',
-    key: 'workflow',
-    icon: renderIcon(ShieldCheckmarkOutline),
-    children: [
-      { label: '待办审批', key: '/workflow/todos' },
-      { label: '审批流配置', key: '/workflow/config' },
-    ],
-  },
-  {
-    label: '系统管理',
-    key: 'system',
-    icon: renderIcon(SettingsOutline),
-    children: [
-      { label: '用户管理', key: '/system/users' },
-      { label: '角色管理', key: '/system/roles' },
-      { label: '权限管理', key: '/system/permissions' },
-      { label: '数据隐私', key: '/system/privacy' },
-    ],
-  },
 ])
 
-const selectedKeys = computed(() => [route.path])
+const selectedKeys = computed(() => {
+  if (
+    route.path === '/ab-testing' ||
+    route.path === '/ab-testing/overview' ||
+    route.path === '/ab-testing/create' ||
+    route.path === '/ab-testing/reports' ||
+    route.path.startsWith('/ab-testing/experiments')
+  ) {
+    return ['/ab-testing/experiments']
+  }
+  if (route.path.startsWith('/intelligent-operation')) {
+    return ['/intelligent-operation/overview']
+  }
+  return [route.path]
+})
+const defaultExpandedMenuKeys = computed(() => (route.path.startsWith('/organization-identity') ? ['organization-identity'] : []))
 const inlineReportMode = computed(() => route.path.includes('/business-attribution/reports/') && String(route.query.Inline ?? route.query.inline) === 'true')
 
 const breadcrumbItems = computed(() => {
+  const breadcrumb = route.meta.breadcrumb
+  if (Array.isArray(breadcrumb) && breadcrumb.length) {
+    return breadcrumb.map(String)
+  }
+
   const matched = route.matched.filter((item) => item.meta?.title)
   return matched.map((item) => String(item.meta.title))
 })
@@ -339,6 +347,7 @@ function handleMenuSelect(key: string) {
         :collapsed-icon-size="20"
         :options="menuOptions"
         :value="selectedKeys[0]"
+        :default-expanded-keys="defaultExpandedMenuKeys"
         @update:value="handleMenuSelect"
       />
     </n-layout-sider>
