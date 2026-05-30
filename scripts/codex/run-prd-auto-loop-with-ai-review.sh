@@ -2,6 +2,7 @@
 set -euo pipefail
 
 MAX_ITERATIONS="${1:-3}"
+MAX_REPAIR_ROUNDS="${2:-2}"
 
 source ./scripts/codex/resolve-current-prd-context.sh
 resolve_current_prd_context
@@ -9,6 +10,7 @@ resolve_current_prd_context
 RUN_SLICE_SCRIPT="./scripts/codex/run-slice-with-review.sh"
 AI_REVIEW_SCRIPT="./scripts/codex/review-current-slice.sh"
 AI_RELEASE_SCRIPT="./scripts/codex/release-current-slice-after-ai-review.sh"
+AI_REPAIR_SCRIPT="./scripts/codex/repair-current-slice-after-ai-review.sh"
 VALIDATE_SCRIPT="./scripts/codex/validate-prd-md-consistency.sh"
 
 mkdir -p "$LOG_DIR"
@@ -28,29 +30,13 @@ if [ ! -f "$MASTER_QUEUE_FILE" ]; then
   exit 1
 fi
 
-if [ ! -x "$RUN_SLICE_SCRIPT" ]; then
-  echo "ERROR: $RUN_SLICE_SCRIPT is not executable or not found."
-  echo "Run: chmod +x $RUN_SLICE_SCRIPT"
-  exit 1
-fi
-
-if [ ! -x "$AI_REVIEW_SCRIPT" ]; then
-  echo "ERROR: $AI_REVIEW_SCRIPT is not executable or not found."
-  echo "Run: chmod +x $AI_REVIEW_SCRIPT"
-  exit 1
-fi
-
-if [ ! -x "$AI_RELEASE_SCRIPT" ]; then
-  echo "ERROR: $AI_RELEASE_SCRIPT is not executable or not found."
-  echo "Run: chmod +x $AI_RELEASE_SCRIPT"
-  exit 1
-fi
-
-if [ ! -x "$VALIDATE_SCRIPT" ]; then
-  echo "ERROR: $VALIDATE_SCRIPT is not executable or not found."
-  echo "Run: chmod +x $VALIDATE_SCRIPT"
-  exit 1
-fi
+for script in "$RUN_SLICE_SCRIPT" "$AI_REVIEW_SCRIPT" "$AI_RELEASE_SCRIPT" "$AI_REPAIR_SCRIPT" "$VALIDATE_SCRIPT"; do
+  if [ ! -x "$script" ]; then
+    echo "ERROR: $script is not executable or not found."
+    echo "Run: chmod +x $script"
+    exit 1
+  fi
+done
 
 if ! command -v codex >/dev/null 2>&1; then
   echo "ERROR: codex command not found."
@@ -131,12 +117,111 @@ commit_current_iteration() {
   }
 }
 
+run_ai_review_once() {
+  local before_log after_log
+
+  before_log="$(latest_ai_review_log)"
+  "$AI_REVIEW_SCRIPT"
+  refresh_context
+  after_log="$(latest_ai_review_log)"
+
+  if [ -z "$after_log" ]; then
+    echo "AI review log was not generated. Stop."
+    exit 1
+  fi
+
+  if [ "$after_log" = "$before_log" ]; then
+    echo "AI review log did not change. Stop."
+    exit 1
+  fi
+
+  echo "$after_log"
+}
+
+ai_review_can_release() {
+  local review_log="$1"
+
+  local final_status can_release blocking_count
+  final_status="$(extract_ai_value "AI_REVIEW_FINAL_STATUS" "$review_log")"
+  can_release="$(extract_ai_value "AI_REVIEW_CAN_RELEASE" "$review_log")"
+  blocking_count="$(extract_ai_value "AI_REVIEW_BLOCKING_COUNT" "$review_log")"
+
+  echo "AI review final status: $final_status"
+  echo "AI review can release: $can_release"
+  echo "AI review blocking count: ${blocking_count:-unknown}"
+
+  [ "$final_status" = "Passed" ] && [ "$can_release" = "Yes" ] && { [ -z "$blocking_count" ] || [ "$blocking_count" = "0" ]; }
+}
+
+run_repair_review_loop() {
+  local initial_review_log="$1"
+  local review_log="$initial_review_log"
+
+  for repair_round in $(seq 0 "$MAX_REPAIR_ROUNDS"); do
+    echo ""
+    echo "----------------------------------------"
+    echo "AI release check / repair round $repair_round / $MAX_REPAIR_ROUNDS"
+    echo "----------------------------------------"
+    echo ""
+
+    if ai_review_can_release "$review_log"; then
+      echo ""
+      echo "AI review allows release."
+      echo "$review_log"
+      return 0
+    fi
+
+    if [ "$repair_round" -eq "$MAX_REPAIR_ROUNDS" ]; then
+      echo ""
+      echo "Reached MAX_REPAIR_ROUNDS=$MAX_REPAIR_ROUNDS. Stop auto loop."
+      git status --short
+      return 1
+    fi
+
+    local final_status can_release blocking_count
+    final_status="$(extract_ai_value "AI_REVIEW_FINAL_STATUS" "$review_log")"
+    can_release="$(extract_ai_value "AI_REVIEW_CAN_RELEASE" "$review_log")"
+    blocking_count="$(extract_ai_value "AI_REVIEW_BLOCKING_COUNT" "$review_log")"
+
+    if [ "$final_status" = "Blocked" ]; then
+      echo "AI review is Blocked. Do not repair automatically."
+      git status --short
+      return 1
+    fi
+
+    if [ -n "$blocking_count" ] && [ "$blocking_count" = "0" ] && [ "$can_release" != "Yes" ]; then
+      echo "No blocking issues but AI review still cannot release. Stop for manual decision."
+      git status --short
+      return 1
+    fi
+
+    echo ""
+    echo "Run AI repair round $((repair_round + 1))..."
+    echo ""
+
+    "$AI_REPAIR_SCRIPT" "$review_log"
+
+    refresh_context
+
+    echo ""
+    echo "Validate PRD md consistency after repair..."
+    validate_context
+
+    echo ""
+    echo "Run AI review again after repair..."
+    review_log="$(run_ai_review_once)"
+  done
+
+  return 1
+}
+
 for i in $(seq 1 "$MAX_ITERATIONS"); do
   refresh_context
 
   echo ""
   echo "========================================"
   echo "Codex PRD auto loop with AI review iteration $i / $MAX_ITERATIONS"
+  echo "Max repair rounds per slice: $MAX_REPAIR_ROUNDS"
   echo "========================================"
   echo ""
 
@@ -211,7 +296,7 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   echo ""
 
   if echo "$FINAL_STATUS" | grep -qi "Needs Fix"; then
-    echo "Slice needs fix. Stop auto loop."
+    echo "Slice needs fix from self-review. Stop auto loop."
     git status --short
     exit 0
   fi
@@ -245,58 +330,17 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   if [ "$NEED_AI_REVIEW" = "Yes" ]; then
     echo ""
     echo "Human Review Required was detected."
-    echo "Run AI second-pass read-only review instead of stopping immediately."
+    echo "Run AI second-pass review and limited repair loop."
     echo ""
 
-    AI_REVIEW_BEFORE="$(latest_ai_review_log)"
+    INITIAL_AI_REVIEW_LOG="$(run_ai_review_once)"
 
-    "$AI_REVIEW_SCRIPT"
-
-    refresh_context
-
-    AI_REVIEW_AFTER="$(latest_ai_review_log)"
-
-    if [ -z "$AI_REVIEW_AFTER" ]; then
-      echo "AI review log was not generated. Stop."
-      exit 1
-    fi
-
-    if [ "$AI_REVIEW_AFTER" = "$AI_REVIEW_BEFORE" ]; then
-      echo "AI review log did not change. Stop."
-      exit 1
-    fi
-
-    AI_FINAL_STATUS="$(extract_ai_value "AI_REVIEW_FINAL_STATUS" "$AI_REVIEW_AFTER")"
-    AI_CAN_RELEASE="$(extract_ai_value "AI_REVIEW_CAN_RELEASE" "$AI_REVIEW_AFTER")"
-    AI_RISK_LEVEL="$(extract_ai_value "AI_REVIEW_RISK_LEVEL" "$AI_REVIEW_AFTER")"
-    AI_BLOCKING_COUNT="$(extract_ai_value "AI_REVIEW_BLOCKING_COUNT" "$AI_REVIEW_AFTER")"
-
-    echo ""
-    echo "AI review final status: $AI_FINAL_STATUS"
-    echo "AI review can release: $AI_CAN_RELEASE"
-    echo "AI review risk level: $AI_RISK_LEVEL"
-    echo "AI review blocking count: $AI_BLOCKING_COUNT"
-    echo ""
-
-    if [ "$AI_FINAL_STATUS" != "Passed" ]; then
-      echo "AI second-pass review did not pass. Stop auto loop."
-      git status --short
+    if ! FINAL_AI_REVIEW_LOG="$(run_repair_review_loop "$INITIAL_AI_REVIEW_LOG")"; then
+      echo "AI review/repair loop did not reach releasable state. Stop auto loop."
       exit 0
     fi
 
-    if [ "$AI_CAN_RELEASE" != "Yes" ]; then
-      echo "AI second-pass review did not allow release. Stop auto loop."
-      git status --short
-      exit 0
-    fi
-
-    if [ -n "$AI_BLOCKING_COUNT" ] && [ "$AI_BLOCKING_COUNT" != "0" ]; then
-      echo "AI second-pass review found blocking issues. Stop auto loop."
-      git status --short
-      exit 0
-    fi
-
-    "$AI_RELEASE_SCRIPT" "$AI_REVIEW_AFTER"
+    "$AI_RELEASE_SCRIPT" "$FINAL_AI_REVIEW_LOG"
 
     refresh_context
 

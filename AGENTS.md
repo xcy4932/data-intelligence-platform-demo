@@ -435,3 +435,33 @@ For PRD mapping quality review, automation may run review/refine loops, but the 
 For implemented development slices, AI second-pass review may run at most once per slice. If AI second-pass review returns Needs Fix, Blocked, or AI_REVIEW_CAN_RELEASE: No, automation must stop. Codex must not automatically enter a repair-review loop for the same implemented slice unless the user explicitly requests it.
 
 Within one implementation run, Codex may fix self-review issues once if they are within the current slice. If issues remain after one fix attempt, mark Needs Fix or Human Review Required and stop.
+
+## Development Slice AI Repair Loop Rule
+
+For implemented development slices, AI second-pass review may be followed by a limited repair-review loop.
+
+Default rule:
+- AI second-pass review may run first.
+- If it finds Blocking issues that are clearly inside the current slice, Codex may run a repair pass.
+- After repair, AI second-pass review may run again.
+- The maximum repair rounds must be controlled by the shell script.
+- Recommended default maximum: 2 repair rounds per slice.
+- Absolute recommended maximum for complex slices: 3 repair rounds per slice.
+
+Repair pass rules:
+- Repair only Blocking issues.
+- Do not repair Suggestions.
+- Do not expand the current slice.
+- Do not implement future slices.
+- Do not modify unrelated files.
+- Do not perform broad refactors.
+- Do not change product decisions.
+- If the fix requires re-slicing, product judgment, broad architecture changes, or future-slice implementation, stop and mark Needs Fix or Blocked.
+
+Release rule:
+A slice can be automatically released only when:
+- AI_REVIEW_FINAL_STATUS: Passed
+- AI_REVIEW_CAN_RELEASE: Yes
+- AI_REVIEW_BLOCKING_COUNT: 0
+
+If the repair-review loop exceeds the configured maximum rounds and the slice is still not releasable, automation must stop.

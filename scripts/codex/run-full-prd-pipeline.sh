@@ -4,6 +4,7 @@ set -euo pipefail
 MAX_PIPELINE_ROUNDS="${1:-20}"
 DEV_ITERATIONS_PER_ROUND="${2:-5}"
 MAPPING_REFINE_ROUNDS="${3:-3}"
+DEV_REPAIR_ROUNDS="${4:-2}"
 
 CURRENT_TASK_FILE="docs/implementation/CURRENT_TASK.md"
 MASTER_QUEUE_FILE="docs/implementation/MASTER_PRD_QUEUE.md"
@@ -346,7 +347,7 @@ run_development_phase() {
 
   "$VALIDATE_SCRIPT"
 
-  "$RUN_DEV_SCRIPT" "$DEV_ITERATIONS_PER_ROUND"
+  "$RUN_DEV_SCRIPT" "$DEV_ITERATIONS_PER_ROUND" "$DEV_REPAIR_ROUNDS"
 
   echo ""
   echo "Development phase returned control to pipeline."
